@@ -1,0 +1,30 @@
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;z-index:999;animation:fadeIn .15s ease;}
+.modal{width:400px;background:linear-gradient(145deg,var(--bg2),var(--bg1));border:1px solid rgba(0,212,255,.12);border-radius:var(--r5);overflow:hidden;position:relative;box-shadow:0 32px 80px rgba(0,0,0,.9);animation:fadeUp .22s var(--smooth);}
+.topGlow{position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--c2),var(--c1),transparent);}
+.header{display:flex;align-items:center;justify-content:space-between;padding:18px 18px 14px;border-bottom:1px solid rgba(0,212,255,.07);}
+.title{font-family:var(--disp);font-size:16px;font-weight:700;letter-spacing:3px;color:var(--t1);}
+.xBtn{width:30px;height:30px;background:transparent;border:1px solid rgba(0,212,255,.1);color:var(--t3);border-radius:var(--r2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+.xBtn:hover{background:rgba(255,40,60,.1);border-color:rgba(255,40,60,.3);color:var(--c5);}
+.list{padding:10px;display:flex;flex-direction:column;gap:5px;max-height:350px;overflow-y:auto;}
+.empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:32px;text-align:center;}
+.emptyIcon{color:var(--t3);}
+.emptyText{font-size:13px;color:var(--t3);}
+.item{display:flex;align-items:center;gap:12px;padding:11px 13px;background:linear-gradient(135deg,rgba(0,212,255,.04),rgba(123,94,167,.03));border:1px solid rgba(0,212,255,.07);border-radius:var(--r2);cursor:pointer;transition:all .18s;position:relative;overflow:hidden;}
+.item:hover{border-color:rgba(0,212,255,.2);background:linear-gradient(135deg,rgba(0,212,255,.08),rgba(123,94,167,.05));}
+.itemActive{border-color:rgba(0,212,255,.28);background:linear-gradient(135deg,rgba(0,212,255,.07),rgba(123,94,167,.05));}
+.activeBar{position:absolute;left:0;top:15%;bottom:15%;width:2px;background:linear-gradient(180deg,var(--c1),var(--c2));border-radius:0 2px 2px 0;box-shadow:0 0 8px var(--c1);}
+.avatar{width:40px;height:40px;border-radius:var(--r2);flex-shrink:0;background:linear-gradient(135deg,rgba(0,212,255,.12),rgba(123,94,167,.12));border:1px solid rgba(0,212,255,.18);display:flex;align-items:center;justify-content:center;position:relative;transition:border-color .2s;}
+.avatarText{font-family:var(--disp);font-size:15px;font-weight:700;color:var(--c1);}
+.onlineDot{position:absolute;bottom:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:var(--c3);border:2px solid var(--bg1);box-shadow:0 0 6px rgba(0,255,157,.8);}
+.info{flex:1;min-width:0;}
+.name{font-size:13px;font-weight:600;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.type{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t3);margin-top:2px;font-family:var(--mono);}
+.typeDot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
+.activeBadge{font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.22);color:var(--c1);flex-shrink:0;font-family:var(--mono);}
+.removeBtn{width:26px;height:26px;background:transparent;border:1px solid transparent;border-radius:var(--r1);color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:all .15s;flex-shrink:0;}
+.item:hover .removeBtn{opacity:1;border-color:rgba(255,40,60,.18);}
+.removeBtn:hover{background:rgba(255,40,60,.12);border-color:rgba(255,40,60,.35);color:var(--c5);}
+.footer{padding:10px;border-top:1px solid rgba(0,212,255,.06);display:flex;align-items:center;justify-content:space-between;}
+.addBtn{display:flex;align-items:center;gap:8px;padding:8px 17px;background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.2);color:var(--c1);font-size:13px;font-weight:600;border-radius:var(--r2);cursor:pointer;transition:all .2s var(--spring);}
+.addBtn:hover{background:rgba(0,212,255,.14);transform:translateY(-1px);}
+.footInfo{font-size:11px;color:var(--t3);font-family:var(--mono);}

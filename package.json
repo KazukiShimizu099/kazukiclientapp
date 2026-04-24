@@ -1,0 +1,63 @@
+{
+  "name": "kazuki-client",
+  "version": "1.0.0",
+  "description": "Kazuki Client - Premium Minecraft Launcher",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:win": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.6.0",
+    "adm-zip": "^0.5.10",
+    "axios": "^1.6.7",
+    "discord-rpc": "^4.0.1",
+    "electron-store": "^8.2.0",
+    "fs-extra": "^11.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^20.11.5",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@types/uuid": "^9.0.7",
+    "@vitejs/plugin-react": "^4.2.1",
+    "electron": "^28.2.0",
+    "electron-builder": "^24.9.1",
+    "electron-vite": "^2.3.0",
+    "typescript": "^5.3.3"
+  },
+  "build": {
+    "appId": "com.kazuki.client",
+    "productName": "Kazuki Client",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build-resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Kazuki Client"
+    }
+  }
+}

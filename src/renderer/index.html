@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta http-equiv="Content-Security-Policy" content="
+      default-src 'self';
+      script-src 'self' 'unsafe-inline';
+      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+      font-src 'self' https://fonts.gstatic.com;
+      img-src 'self' https: data: blob:;
+      connect-src 'self' https://api.modrinth.com https://cdn.modrinth.com https://launchermeta.mojang.com https://resources.download.minecraft.net https://piston-meta.mojang.com https://piston-data.mojang.com https://libraries.minecraft.net https://maven.fabricmc.net https://files.minecraftforge.net https://user.auth.xboxlive.com https://xsts.auth.xboxlive.com https://api.minecraftservices.com https://login.microsoftonline.com;
+    "/>
+    <title>Kazuki Client</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
