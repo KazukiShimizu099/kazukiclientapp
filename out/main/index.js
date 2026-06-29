@@ -494,6 +494,41 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
     await fs__namespace.ensureDir(path__namespace.join(getGameDir$1(), "instances", inst.id, "mods"));
     return { success: true, instance: inst };
   });
+  ipcMain.handle("instance:get-all", async () => {
+    return { success: true, instances: store2.get("instances", []) };
+  });
+  ipcMain.handle("instance:delete", async (_, id) => {
+    try {
+      const all = store2.get("instances", []);
+      store2.set("instances", all.filter((i) => i.id !== id));
+      await fs__namespace.remove(path__namespace.join(getGameDir$1(), "instances", id));
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  ipcMain.handle("instance:open-folder", async (_, instanceId) => {
+    try {
+      const dir = path__namespace.join(getGameDir$1(), "instances", instanceId);
+      await fs__namespace.ensureDir(dir);
+      await electron.shell.openPath(dir);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  ipcMain.handle("instance:update", async (_, { id, data }) => {
+    try {
+      const all = store2.get("instances", []);
+      const idx = all.findIndex((i) => i.id === id);
+      if (idx === -1) throw new Error("Instance not found");
+      all[idx] = { ...all[idx], ...data };
+      store2.set("instances", all);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
   ipcMain.handle("instance:launch", async (event, instanceId) => {
     try {
       const win = electron.BrowserWindow.fromWebContents(event.sender);

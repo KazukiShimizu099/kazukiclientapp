@@ -114,6 +114,7 @@ async function autoOptimizeInstance(instId: string, mcVersion: string, loader: s
 }
 
 export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWindow|null) {
+  // CREATE INSTANCE
   ipcMain.handle('instance:create', async (_,data:any)=>{
     const inst:Instance = {...data, id:uuidv4(), createdAt:Date.now()};
     const instances:Instance[] = store.get('instances',[]);
@@ -123,6 +124,47 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     return {success:true,instance:inst};
   });
 
+  // GET ALL INSTANCES (Yeh miss kar diya tha tune)
+  ipcMain.handle('instance:get-all', async () => {
+    return { success: true, instances: store.get('instances', []) };
+  });
+
+  // DELETE INSTANCE (Yeh bhi missing tha)
+  ipcMain.handle('instance:delete', async (_, id: string) => {
+    try {
+      const all: Instance[] = store.get('instances', []);
+      store.set('instances', all.filter((i: any) => i.id !== id));
+      await fs.remove(path.join(getGameDir(), 'instances', id));
+      return { success: true };
+    } catch (e: any) { return { success: false, error: e.message }; }
+  });
+
+  // OPEN FOLDER (Missing)
+  ipcMain.handle('instance:open-folder', async (_, instanceId: string) => {
+    try {
+      const dir = path.join(getGameDir(), 'instances', instanceId);
+      await fs.ensureDir(dir);
+      await shell.openPath(dir);
+      return { success: true };
+    } catch (e: any) { return { success: false, error: e.message }; }
+  });
+
+  // UPDATE SETTINGS (Missing)
+  ipcMain.handle('instance:update', async (_, { id, data }) => {
+    try {
+      const all: Instance[] = store.get('instances', []);
+      const idx = all.findIndex((i: any) => i.id === id);
+      if (idx === -1) throw new Error('Instance not found');
+      
+      all[idx] = { ...all[idx], ...data };
+      store.set('instances', all);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
+  // LAUNCH INSTANCE
   ipcMain.handle('instance:launch',async(event,instanceId:string)=>{
     try{
       const win = BrowserWindow.fromWebContents(event.sender);

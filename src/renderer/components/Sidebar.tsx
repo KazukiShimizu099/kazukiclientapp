@@ -2,10 +2,14 @@ import s from './Sidebar.module.css'
 
 interface Props {
   activeTab: string
-  setActiveTab: (t: string) => void
+  onTabChange: (t: any) => void
+  account?: any
+  accountCount?: number
+  onAccountClick?: () => void
+  onAddAccount?: () => void
 }
 
-export default function Sidebar({ activeTab, setActiveTab }: Props) {
+export default function Sidebar({ activeTab, onTabChange, account, accountCount, onAccountClick, onAddAccount }: Props) {
   const navItems = [
     { id: 'home', icon: '⌂', label: 'Dashboard' },
     { id: 'mods', icon: '⌘', label: 'Mod Manager' },
@@ -25,7 +29,7 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
           <button
             key={item.id}
             className={`${s.navBtn} ${activeTab === item.id ? s.active : ''}`}
-            onClick={() => setActiveTab(item.id)}
+            onClick={() => onTabChange(item.id)}
           >
             <span className={s.icon}>{item.icon}</span>
             <span className={s.label}>{item.label}</span>
@@ -34,6 +38,20 @@ export default function Sidebar({ activeTab, setActiveTab }: Props) {
       </div>
 
       <div className={s.footer}>
+        {/* Account Switcher Section */}
+        <div className={s.accountBox} onClick={onAccountClick}>
+          {account ? (
+            <>
+              <img src={`https://minotar.net/helm/${account.username}/32`} alt="Skin" className={s.avatar} />
+              <div className={s.accInfo}>
+                <div className={s.accName}>{account.username}</div>
+                <div className={s.accType}>{account.type === 'microsoft' ? 'Microsoft' : 'Offline'}</div>
+              </div>
+            </>
+          ) : (
+            <div className={s.noAcc}>+ Login / Add Account</div>
+          )}
+        </div>
         <div className={s.version}>v1.0.0 Alpha</div>
       </div>
     </div>

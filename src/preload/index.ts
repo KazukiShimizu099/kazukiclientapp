@@ -1,45 +1,57 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
-contextBridge.exposeInMainWorld('kazuki', {
-  window: {
-    minimize: () => ipcRenderer.send('window:minimize'),
-    maximize: () => ipcRenderer.send('window:maximize'),
-    close:    () => ipcRenderer.send('window:close'),
-  },
-  auth: {
-    microsoftStart: ()                => ipcRenderer.invoke('auth:microsoft-start'),
-    microsoftPoll:  (data:any)        => ipcRenderer.invoke('auth:microsoft-poll', data),
-    offlineLogin:   (u:string)        => ipcRenderer.invoke('auth:offline-login', u),
-    logout:         ()                => ipcRenderer.invoke('auth:logout'),
-    getAccount:     ()                => ipcRenderer.invoke('auth:get-account'),
-    getSkinHead:    (uuid:string)     => ipcRenderer.invoke('auth:get-skin-head', uuid),
-  },
-  versions: {
-    getList: ()                       => ipcRenderer.invoke('versions:get-list'),
-    install: (versionId:string)       => ipcRenderer.invoke('versions:install', versionId),
-  },
-  instance: {
-    create:     (data:any)  => ipcRenderer.invoke('instance:create', data),
-    delete:     (id:string) => ipcRenderer.invoke('instance:delete', id),
-    getAll:     ()          => ipcRenderer.invoke('instance:get-all'),
-    launch:     (id:string) => ipcRenderer.invoke('instance:launch', id),
-    openFolder: (id:string) => ipcRenderer.invoke('instance:open-folder', id),
-  },
-  mods: {
-    search:       (data:any) => ipcRenderer.invoke('mods:search', data),
-    install:      (data:any) => ipcRenderer.invoke('mods:install', data),
-    getInstalled: (instId:string) => ipcRenderer.invoke('mods:get-installed', instId),
-    remove:       (data:any) => ipcRenderer.invoke('mods:remove', data),
-  },
-  settings: {
-    get:        ()                    => ipcRenderer.invoke('settings:get'),
-    set:        (k:string,v:any)      => ipcRenderer.invoke('settings:set',{key:k,value:v}),
-    systemInfo: ()                    => ipcRenderer.invoke('settings:system-info'),
-  },
-  on:  (channel:string, cb:(...args:any[])=>void) => {
-    const h = (_:any,...a:any[]) => cb(...a)
-    ipcRenderer.on(channel,h)
-    return h
-  },
-  off: (channel:string) => ipcRenderer.removeAllListeners(channel),
-})
+if (!process.contextIsolated) {
+  throw new Error('contextIsolation must be enabled in the BrowserWindow')
+}
+
+try {
+  contextBridge.exposeInMainWorld('kazuki', {
+    // 1. INSTANCE HANDLERS
+    instance: {
+      create: (data: any) => ipcRenderer.invoke('instance:create', data),
+      getAll: () => ipcRenderer.invoke('instance:get-all'),
+      delete: (id: string) => ipcRenderer.invoke('instance:delete', id),
+      update: (data: {id: string, data: any}) => ipcRenderer.invoke('instance:update', data),
+      launch: (id: string) => ipcRenderer.invoke('instance:launch', id),
+      openFolder: (id: string) => ipcRenderer.invoke('instance:open-folder', id)
+    },
+    
+    // 2. VERSIONS HANDLERS
+    versions: {
+      getList: () => ipcRenderer.invoke('versions:get-list'),
+      install: (id: string) => ipcRenderer.invoke('versions:install', id)
+    },
+
+    // 3. SETTINGS HANDLERS (Ye missing the, isiliye accounts glitch kar rahe the)
+    settings: {
+      get: (key?: string) => ipcRenderer.invoke('settings:get', key),
+      set: (key: string, value: any) => ipcRenderer.invoke('settings:set', key, value)
+    },
+
+    // 4. AUTHENTICATION HANDLERS (Ye missing the)
+    auth: {
+      getAccount: () => ipcRenderer.invoke('auth:get-account'),
+      login: (type: string) => ipcRenderer.invoke('auth:login', type),
+      logout: () => ipcRenderer.invoke('auth:logout')
+    },
+
+    // 5. MOD MANAGER HANDLERS (Ye missing the, mod page block tha)
+    mods: {
+      search: (query: string, loader: string, version: string) => ipcRenderer.invoke('mods:search', query, loader, version),
+      install: (projectId: string, versionId: string, instanceId: string) => ipcRenderer.invoke('mods:install', projectId, versionId, instanceId),
+      uninstall: (modId: string, instanceId: string) => ipcRenderer.invoke('mods:uninstall', modId, instanceId),
+      getInstalled: (instanceId: string) => ipcRenderer.invoke('mods:get-installed', instanceId)
+    },
+
+    // EVENT LISTENERS
+    on: (channel: string, callback: (...args: any[]) => void) => {
+      const subscription = (_event: any, ...args: any[]) => callback(...args)
+      ipcRenderer.on(channel, subscription)
+    },
+    off: (channel: string) => {
+      ipcRenderer.removeAllListeners(channel)
+    }
+  })
+} catch (error) {
+  console.error(error)
+}
