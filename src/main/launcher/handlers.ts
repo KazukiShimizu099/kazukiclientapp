@@ -37,7 +37,6 @@ function getRequiredJavaVersion(mcVersion?: string): number {
 async function ensureJavaRuntime(mcVersion: string, gameDir: string, win: BrowserWindow | null): Promise<string> {
   const javaVer = getRequiredJavaVersion(mcVersion);
   const runtimeDir = path.join(gameDir, 'runtime', `java-${javaVer}`);
-  
   const findJavaw = async (dir: string): Promise<string | null> => {
     if (!await fs.pathExists(dir)) return null;
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -52,277 +51,122 @@ async function ensureJavaRuntime(mcVersion: string, gameDir: string, win: Browse
     }
     return null;
   };
-
   const existing = await findJavaw(runtimeDir);
-  if (existing) {
-    win?.webContents.send('instance:log', `[System] Using isolated Java ${javaVer} (x64) environment.`);
-    return existing;
-  }
-
-  win?.webContents.send('instance:log', `[System] Java ${javaVer} not found. Preparing automatic download...`);
+  if (existing) return existing;
+  win?.webContents.send('instance:log', `[System] Java ${javaVer} not found. Downloading...`);
   await fs.ensureDir(runtimeDir);
-  
   const apiUrl = `https://api.adoptium.net/v3/binary/latest/${javaVer}/ga/windows/x64/jre/hotspot/normal/eclipse`;
   const zipPath = path.join(runtimeDir, 'temp.zip');
-  
-  try {
-    win?.webContents.send('instance:log', `[System] Downloading Java Runtime Environment...`);
-    const response = await axios({ method: 'GET', url: apiUrl, responseType: 'stream' });
-    
-    await new Promise<void>((resolve, reject) => {
-      const writer = fs.createWriteStream(zipPath);
-      response.data.pipe(writer);
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    win?.webContents.send('instance:log', `[System] Extracting Java architecture...`);
-    const zip = new AdmZip(zipPath);
-    zip.extractAllTo(runtimeDir, true);
-    await fs.remove(zipPath);
-
-    const extracted = await findJavaw(runtimeDir);
-    if (!extracted) throw new Error(`Java binary missing.`);
-    return extracted;
-  } catch (error: any) {
-    throw new Error(`Failed to provision Java ${javaVer}. Detail: ${error.message}`);
-  }
+  const response = await axios({ method: 'GET', url: apiUrl, responseType: 'stream' });
+  await new Promise<void>((resolve, reject) => {
+    const writer = fs.createWriteStream(zipPath);
+    response.data.pipe(writer);
+    writer.on('finish', resolve);
+    writer.on('error', reject);
+  });
+  const zip = new AdmZip(zipPath);
+  zip.extractAllTo(runtimeDir, true);
+  await fs.remove(zipPath);
+  const extracted = await findJavaw(runtimeDir);
+  if (!extracted) throw new Error('Java missing.');
+  return extracted;
 }
 
 function buildJvmArgs(minRam:number, reqMaxRam:number, nativesDir:string, custom?:string, mcVersion?:string): string[] {
   const sysTotalRam = Math.floor(os.totalmem() / (1024 * 1024)); 
-  const osReserved = 2048; 
-  const safeMaxRam = Math.max(1024, sysTotalRam - osReserved); 
+  const safeMaxRam = Math.max(1024, sysTotalRam - 2048); 
   const finalMaxRam = Math.min(reqMaxRam, safeMaxRam);
-  const safeMin = Math.min(Math.max(minRam, 256), finalMaxRam);
-  
   const javaVer = getRequiredJavaVersion(mcVersion);
-  const useZGC = javaVer >= 21;
-
   const base = [
-    `-Xms${safeMin}M`, `-Xmx${finalMaxRam}M`,
-    useZGC ? '-XX:+UseZGC' : '-XX:+UseG1GC',
-    `-XX:+UnlockExperimentalVMOptions`,
-    `-XX:MaxGCPauseMillis=200`,
-    `-XX:+ParallelRefProcEnabled`,
-    `-XX:+DisableExplicitGC`,
-    `-XX:SurvivorRatio=32`,
-    `-XX:+PerfDisableSharedMem`,
-    `-XX:MaxTenuringThreshold=1`,
-    `-Dlog4j2.formatMsgNoLookups=true`,
+    `-Xms${Math.min(minRam, finalMaxRam)}M`, `-Xmx${finalMaxRam}M`,
+    javaVer >= 21 ? '-XX:+UseZGC' : '-XX:+UseG1GC',
     `-Djava.library.path=${nativesDir}`,
-    `-Dminecraft.launcher.brand=KazukiClient`,
-    `-Dminecraft.launcher.version=1.0.0`,
-    `-Dfml.ignoreInvalidMinecraftCertificates=true`,
-    `-Dfml.ignorePatchDiscrepancies=true`,
-  ]
-  if (custom?.trim()) base.push(...custom.split(' ').filter(Boolean))
-  return base
+    `-Dlog4j2.formatMsgNoLookups=true`
+  ];
+  if (custom?.trim()) base.push(...custom.split(' ').filter(Boolean));
+  return base;
 }
 
-function buildClasspath(libraries:any[], gameDir:string, versionId:string): string {
-  const paths: string[] = []
-  for (const lib of libraries) {
-    if (!lib.downloads?.artifact) continue
-    if (lib.rules) {
-      let ok = false
-      for (const r of lib.rules) {
-        if (r.action==='allow' && (!r.os || r.os.name==='windows')) ok=true
-        if (r.action==='disallow' && r.os?.name==='windows') { ok=false; break }
-      }
-      if (!ok) continue
-    }
-    const p = path.join(gameDir, 'libraries', lib.downloads.artifact.path)
-    if (fs.existsSync(p)) paths.push(p)
-  }
-  const jar = path.join(gameDir,'versions',versionId,`${versionId}.jar`)
-  if (fs.existsSync(jar)) paths.push(jar)
-  return paths.join(path.delimiter)
-}
-
-function resolveArgs(args:string[], rep:Record<string,string>): string[] {
-  return args.map(a => {
-    let r = a
-    for (const [k,v] of Object.entries(rep)) { r = r.replace(new RegExp(`\\$\\{${k}\\}`,'g'), v) }
-    return r
-  })
-}
-
-// Fabric Maven Parser Helper
 function parseMaven(name: string, baseUrl: string = 'https://maven.fabricmc.net/') {
   const p = name.split(':');
   const g = p[0].replace(/\./g, '/');
-  const file = `${p[1]}-${p[2]}.jar`;
-  return { url: `${baseUrl}${g}/${p[1]}/${p[2]}/${file}`, path: `${g}/${p[1]}/${p[2]}/${file}` };
+  return { url: `${baseUrl}${g}/${p[1]}/${p[2]}/${p[1]}-${p[2]}.jar`, path: `${g}/${p[1]}/${p[2]}/${p[1]}-${p[2]}.jar` };
+}
+
+async function autoOptimizeInstance(instId: string, mcVersion: string, loader: string, win: BrowserWindow | null) {
+  if (loader !== 'fabric') return;
+  const modsDir = path.join(getGameDir(), 'instances', instId, 'mods');
+  const mods = [{ slug: 'sodium' }, { slug: 'lithium' }, { slug: 'ferrite-core' }];
+  for (const mod of mods) {
+    try {
+      const res = await axios.get(`https://api.modrinth.com/v2/project/${mod.slug}/version`, { params: { loaders: JSON.stringify([loader]), game_versions: JSON.stringify([mcVersion]) } });
+      if (res.data[0]) {
+        const file = res.data[0].files[0];
+        const dest = path.join(modsDir, file.filename);
+        if (!await fs.pathExists(dest)) {
+          win?.webContents.send('instance:log', `[Optimizer] Injecting ${mod.slug}...`);
+          const fRes = await axios({ url: file.url, responseType: 'stream' });
+          fRes.data.pipe(fs.createWriteStream(dest));
+        }
+      }
+    } catch (e) {}
+  }
 }
 
 export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWindow|null) {
   ipcMain.handle('instance:create', async (_,data:any)=>{
-    try {
-      const inst:Instance = {...data, id:uuidv4(), createdAt:Date.now()}
-      const instances:Instance[] = store.get('instances',[])
-      instances.push(inst)
-      store.set('instances',instances)
-      const dir = path.join(getGameDir(),'instances',inst.id)
-      await Promise.all([
-        fs.ensureDir(path.join(dir,'mods')),
-        fs.ensureDir(path.join(dir,'resourcepacks')),
-        fs.ensureDir(path.join(dir,'saves')),
-        fs.ensureDir(path.join(dir,'config')),
-        fs.ensureDir(path.join(dir,'logs'))
-      ])
-      return {success:true,instance:inst}
-    } catch(e:any){return{success:false,error:e.message}}
-  })
-
-  ipcMain.handle('instance:get-all',async()=>({success:true,instances:store.get('instances',[])}))
-  
-  ipcMain.handle('instance:delete',async(_,id:string)=>{
-    try{
-      const all:Instance[]=store.get('instances',[])
-      store.set('instances',all.filter((i:any)=>i.id!==id))
-      await fs.remove(path.join(getGameDir(),'instances',id))
-      return{success:true}
-    }catch(e:any){return{success:false,error:e.message}}
-  })
-
-  ipcMain.handle('instance:open-folder', async (_, instanceId: string) => {
-    try {
-      const dir = path.join(getGameDir(), 'instances', instanceId);
-      await fs.ensureDir(dir);
-      await shell.openPath(dir);
-      return { success: true };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    const inst:Instance = {...data, id:uuidv4(), createdAt:Date.now()};
+    const instances:Instance[] = store.get('instances',[]);
+    instances.push(inst);
+    store.set('instances',instances);
+    await fs.ensureDir(path.join(getGameDir(),'instances',inst.id,'mods'));
+    return {success:true,instance:inst};
   });
 
   ipcMain.handle('instance:launch',async(event,instanceId:string)=>{
     try{
-      const win = BrowserWindow.fromWebContents(event.sender)
-      const all:Instance[]=store.get('instances',[])
-      const inst=all.find((i:any)=>i.id===instanceId)
-      if(!inst) throw new Error('Instance not found')
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const inst = (store.get('instances',[]) as Instance[]).find(i=>i.id===instanceId);
+      if(!inst) throw new Error('Not found');
 
-      const account=store.get('account')
-      if(!account) throw new Error('Not logged in.')
+      const gameDir = getGameDir();
+      const actualId = (store.get(`installed.${inst.mcVersion}`)?.actualId) || inst.mcVersion;
+      const instDir = path.join(gameDir, 'instances', instanceId);
+      
+      await autoOptimizeInstance(instanceId, actualId, inst.loader, win);
 
-      const settings:LauncherSettings=store.get('settings',{})
-      const gameDir=getGameDir()
-
-      const meta=store.get(`installed.${inst.mcVersion}`)
-      const actualId=meta?.actualId||inst.mcVersion
-
-      const versionDir=path.join(gameDir,'versions',actualId)
-      const versionJson=path.join(versionDir,`${actualId}.json`)
-      if(!await fs.pathExists(versionJson)) throw new Error(`Core files missing. Recreate instance.`)
-
-      const vd=await fs.readJson(versionJson)
-      const nativesDir=path.join(versionDir,'natives')
-      const instDir=path.join(gameDir,'instances',instanceId)
-
-      await fs.ensureDir(instDir)
-      await fs.ensureDir(nativesDir)
-
+      const vd = await fs.readJson(path.join(gameDir, 'versions', actualId, `${actualId}.json`));
+      const libs: any[] = [...vd.libraries];
       let mainClass = vd.mainClass;
-      let gameArgsRaw: string[] = [];
-      if (vd.arguments?.game) gameArgsRaw.push(...vd.arguments.game.filter((a:any)=>typeof a==='string'));
-      else if (vd.minecraftArguments) gameArgsRaw.push(...vd.minecraftArguments.split(' '));
 
-      const allLibs = [...vd.libraries];
-
-      // THE CORE FIX: DYNAMIC FABRIC INJECTION
       if (inst.loader === 'fabric') {
-        win?.webContents.send('instance:log', '[System] Checking Fabric Loader requirements...');
-        const metaRes = await axios.get(`https://meta.fabricmc.net/v2/versions/loader/${inst.mcVersion}`);
-        if (!metaRes.data || metaRes.data.length === 0) throw new Error(`Fabric is not available for ${inst.mcVersion}`);
-        
-        const loaderVer = metaRes.data[0].loader.version;
-        win?.webContents.send('instance:log', `[System] Injecting Fabric ${loaderVer}...`);
-        
-        const profileRes = await axios.get(`https://meta.fabricmc.net/v2/versions/loader/${inst.mcVersion}/${loaderVer}/profile/json`);
-        const fp = profileRes.data;
-
-        mainClass = fp.mainClass; // Overrides Vanilla Main with KnotClient
-        if (fp.arguments?.game) gameArgsRaw.push(...fp.arguments.game);
-        
+        const meta = (await axios.get(`https://meta.fabricmc.net/v2/versions/loader/${inst.mcVersion}`)).data[0];
+        const fp = (await axios.get(`https://meta.fabricmc.net/v2/versions/loader/${inst.mcVersion}/${meta.loader.version}/profile/json`)).data;
+        mainClass = fp.mainClass;
         for (const lib of fp.libraries) {
-          const maven = parseMaven(lib.name, lib.url);
-          const dest = path.join(gameDir, 'libraries', maven.path);
-          
-          allLibs.push({ downloads: { artifact: { path: maven.path } } });
-
+          const m = parseMaven(lib.name, lib.url);
+          const dest = path.join(gameDir, 'libraries', m.path);
+          libs.push({ downloads: { artifact: { path: m.path } } });
           if (!await fs.pathExists(dest)) {
             await fs.ensureDir(path.dirname(dest));
-            try {
-              const res = await axios({ method:'GET', url:maven.url, responseType:'stream' });
-              const writer = fs.createWriteStream(dest);
-              res.data.pipe(writer);
-              await new Promise((res,rej) => { writer.on('finish',res); writer.on('error',rej); });
-            } catch(e) { throw new Error(`Failed to download Fabric dependency: ${lib.name}`); }
+            const r = await axios({ url: m.url, responseType: 'stream' });
+            r.data.pipe(fs.createWriteStream(dest));
           }
         }
       }
 
-      const classpath=buildClasspath(allLibs, gameDir, actualId)
-      if(!classpath.trim()) throw new Error('Libraries missing.')
-
-      const javaPath = await ensureJavaRuntime(actualId, gameDir, win)
-      const jvmArgs=buildJvmArgs(inst.minRam||512,inst.maxRam||2048,nativesDir,(inst as any).customJvmArgs,inst.mcVersion)
+      const cp = libs.filter(l=>l.downloads?.artifact).map(l=>path.join(gameDir,'libraries',l.downloads.artifact.path)).concat(path.join(gameDir,'versions',actualId,`${actualId}.jar`)).join(path.delimiter);
+      const java = await ensureJavaRuntime(actualId, gameDir, win);
+      const args = [...buildJvmArgs(inst.minRam||512, inst.maxRam||2048, path.join(gameDir,'versions',actualId,'natives'), inst.customJvmArgs, inst.mcVersion), '-cp', cp, mainClass];
       
-      const uuid=(account.uuid||'').replace(/-/g,'')||'0'.repeat(32)
-      const rep:Record<string,string>={
-        auth_player_name:  account.username,
-        version_name:      actualId,
-        game_directory:    instDir,
-        assets_root:       path.join(gameDir,'assets'),
-        assets_index_name: vd.assetIndex?.id||actualId,
-        auth_uuid:         uuid,
-        auth_access_token: account.accessToken||'0',
-        clientid:          '0',
-        auth_xuid:         '0',
-        user_type:         account.type==='microsoft'?'msa':'legacy',
-        version_type:      vd.type||'release',
-        resolution_width:  '1280',
-        resolution_height: '720',
-        classpath,
-      }
-
-      const gameArgs=resolveArgs(gameArgsRaw,rep)
-      const fullArgs=[...jvmArgs,'-cp',classpath,mainClass,...gameArgs]
-
-      const cleanEnv = Object.assign({}, process.env)
-      delete cleanEnv._JAVA_OPTIONS
-      delete cleanEnv.JAVA_TOOL_OPTIONS
-      delete cleanEnv.JAVA_HOME
-      delete cleanEnv.JRE_HOME
-
-      const safeArgs = fullArgs.map(arg => arg.replace(/NaN/g, '2048'))
-
-      const child=spawn(javaPath,safeArgs,{ cwd:instDir, stdio: ['ignore', 'pipe', 'pipe'], env: cleanEnv })
-      activeProcesses.set(instanceId, child)
-
-      child.stdout?.on('data', (data) => {
-        const msg = data.toString().trim()
-        if (msg) win?.webContents.send('instance:log', `[Game] ${msg}`)
-      })
-
-      child.stderr?.on('data', (data) => {
-        const msg = data.toString().trim()
-        if (msg) win?.webContents.send('instance:log', `[JVM ERROR] ${msg}`)
-      })
-
-      child.on('exit', (code) => {
-        activeProcesses.delete(instanceId)
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('instance:log', `[System] Process exited with code ${code}`)
-          win.webContents.send('instance:exit', { instanceId, code })
-        }
-      })
-
-      const idx=all.findIndex((i:any)=>i.id===instanceId)
-      if(idx!==-1){ all[idx].lastPlayed=Date.now(); store.set('instances',all) }
-      if((settings as any).minimizeOnGame) win?.minimize()
-
-      return{success:true,pid:child.pid}
-    }catch(e:any){ return{success:false,error:e.message} }
-  })
+      const env = Object.assign({}, process.env);
+      delete env._JAVA_OPTIONS; delete env.JAVA_TOOL_OPTIONS;
+      
+      const child = spawn(java, args, { cwd: instDir, stdio: ['ignore', 'pipe', 'pipe'], env });
+      activeProcesses.set(instanceId, child);
+      child.stdout?.on('data', (d) => win?.webContents.send('instance:log', `[Game] ${d}`));
+      child.stderr?.on('data', (d) => win?.webContents.send('instance:log', `[JVM] ${d}`));
+      return {success:true};
+    } catch(e:any){ return {success:false, error:e.message}; }
+  });
 }

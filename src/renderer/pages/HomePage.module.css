@@ -120,3 +120,15 @@
 .addPlus { font-size:24px;font-weight:300;transition:transform .2s ease; }
 .addCard:hover .addPlus { transform:scale(1.1); }
 .addLbl  { font-size:13px;font-weight:500; }
+
+.editBtn { 
+  background: rgba(255,255,255,0.05); 
+  border: none; 
+  color: #fff; 
+  padding: 6px 10px; 
+  border-radius: 4px; 
+  cursor: pointer; 
+  font-size: 12px;
+}
+.editBtn:hover { background: rgba(255,255,255,0.1); }
+.card { display: flex; justify-content: space-between; align-items: center; padding: 15px; border: 1px solid #222; border-radius: 8px; cursor: pointer; }
