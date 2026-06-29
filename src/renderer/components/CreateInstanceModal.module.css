@@ -1,25 +1,26 @@
-.overlay { position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;z-index:999;animation:fadeIn 0.15s ease; }
-.modal { background:#050508;border:1px solid rgba(255,255,255,0.06);border-radius:12px;width:100%;max-width:440px;box-shadow:0 24px 60px rgba(0,0,0,0.9);animation:slideUp 0.2s ease-out; }
-.header { display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid rgba(255,255,255,0.04); }
-.title { font-size:15px;font-weight:600;color:#fff; }
-.close { background:transparent;border:none;color:rgba(255,255,255,0.4);font-size:16px;cursor:pointer;transition:color 0.15s; }
-.close:hover { color:#ef4444; }
-.form { padding:24px;display:flex;flex-direction:column;gap:18px; }
-.row { display:flex;gap:16px; }
+.overlay { position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:999; }
+.modal { background:#0a0a0c; border:1px solid #1a1a1e; border-radius:10px; width:100%; max-width:400px; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+.header { display:flex; align-items:center; justify-content:space-between; padding:16px 20px; border-bottom:1px solid #1a1a1e; }
+.title { font-size:14px; font-weight:600; color:#fff; }
+.close { background:none; border:none; color:#666; font-size:16px; cursor:pointer; }
+.close:hover:not(:disabled) { color:#fff; }
+.loadingTxt { padding:40px; text-align:center; color:#666; font-size:13px; }
+.form { padding:20px; display:flex; flex-direction:column; gap:16px; }
+.row { display:flex; gap:12px; }
 .row > * { flex:1; }
-.field { display:flex;flex-direction:column;gap:8px; }
-.field label { font-size:12px;color:rgba(255,255,255,0.5);font-weight:600; text-transform:uppercase; letter-spacing: 1px; }
-.field input, .field select { background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);color:#fff;padding:12px;border-radius:8px;font-size:13px;outline:none;transition:all 0.2s;font-family: inherit; }
-.field input:focus, .field select:focus { border-color:rgba(255,255,255,0.3); background:rgba(255,255,255,0.05); }
-.field select option { background:#0a0a0f;color:#fff; }
-.hint { font-size:11px;color:rgba(255,255,255,0.3); }
-.error { padding:12px;background:rgba(220,38,38,0.1);border:1px solid rgba(220,38,38,0.2);color:#ef4444;border-radius:8px;font-size:12px;font-weight:500; }
-.footer { display:flex;justify-content:flex-end;gap:12px;margin-top:8px; }
-.cancel { padding:10px 20px;background:transparent;border:none;color:rgba(255,255,255,0.6);font-size:13px;font-weight:600;cursor:pointer; transition: color 0.15s;}
-.cancel:hover { color:#fff; }
-.submit { padding:10px 24px;background:#fff;color:#000;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.15s; }
-.submit:hover:not(:disabled) { background:#e5e5e5;transform:translateY(-1px); }
-.submit:disabled { opacity:0.5;cursor:not-allowed; }
+.field { display:flex; flex-direction:column; gap:6px; }
+.field label { font-size:11px; color:#888; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; }
+.field input, .field select { background:#121214; border:1px solid #222; color:#fff; padding:10px 12px; border-radius:6px; font-size:13px; outline:none; font-family:inherit; }
+.field input:focus, .field select:focus { border-color:#444; }
+.error { padding:10px; background:rgba(220,38,38,0.1); border:1px solid rgba(220,38,38,0.2); color:#ef4444; border-radius:6px; font-size:12px; }
+.footer { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
+.cancel { padding:8px 16px; background:none; border:none; color:#888; font-size:13px; cursor:pointer; }
+.cancel:hover:not(:disabled) { color:#fff; }
+.submit { padding:8px 16px; background:#fff; color:#000; border:none; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; }
+.submit:disabled { opacity:0.5; cursor:not-allowed; }
 
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-@keyframes slideUp { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+/* Clean Progress Bar */
+.progWrap { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+.progInfo { display:flex; justify-content:space-between; font-size:11px; color:#888; font-family:var(--mono); }
+.progBar { height:4px; background:#1a1a1e; border-radius:2px; overflow:hidden; }
+.progFill { height:100%; background:#fff; transition:width 0.2s; }

@@ -24,7 +24,7 @@ export class KazukiRPCManager {
         this.client.on('ready', () => {
             this.isReady = true;
             console.log('SUCCESS: Discord RPC connected automatically.');
-            this.updateActivity('Kazuki Client v1.0', 'In Launcher');
+            this.updateActivity('Kazuki Client', 'In Launcher');
             
             if (this.reconnectTimeout) {
                 clearTimeout(this.reconnectTimeout);
@@ -67,7 +67,7 @@ export class KazukiRPCManager {
             smallImageText: 'Minecraft',
             instance: false,
             buttons: [
-                { label: "Get Kazuki Client", url: "https://github.com/kazuki-client" },
+                { label: "Get Kazuki Client", url: "https://github.com/" },
                 { label: "Discord Server", url: "https://discord.gg/T3AEpEjA9m" }
             ]
         }).catch(() => { /* Silent fail to prevent crash */ });

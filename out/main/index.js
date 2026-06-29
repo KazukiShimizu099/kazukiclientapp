@@ -178,31 +178,87 @@ function setupAuthHandlers(ipcMain, store2) {
 }
 const MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL = "https://resources.download.minecraft.net";
-const VERSION_ID_MAP = {
-  "26.1.1": "26.1.1",
-  "26.1": "26.1"
-};
 function getGameDir$2() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
 }
-async function downloadFile(url, dest, onProgress) {
+function formatBytes(bytes) {
+  if (!+bytes) return "0 MB";
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+async function downloadFile(url, dest, win, label, maxRetries = 3) {
   await fs__namespace.ensureDir(path__namespace.dirname(dest));
-  if (await fs__namespace.pathExists(dest)) {
-    const stat = await fs__namespace.stat(dest);
-    if (stat.size > 0) return;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      let start = 0;
+      if (await fs__namespace.pathExists(dest)) {
+        start = (await fs__namespace.stat(dest)).size;
+      }
+      if (start > 0) {
+        try {
+          const headRes = await axios.head(url, { timeout: 1e4 });
+          const remoteSize = parseInt(headRes.headers["content-length"] || "0", 10);
+          if (remoteSize > 0) {
+            if (start === remoteSize) {
+              win?.webContents.send("download:progress", { name: label, percent: 100, detail: "Skipped (Already downloaded)" });
+              return;
+            }
+            if (start > remoteSize) {
+              await fs__namespace.remove(dest);
+              start = 0;
+            }
+          }
+        } catch (e) {
+        }
+      }
+      const response = await axios({
+        method: "GET",
+        url,
+        responseType: "stream",
+        headers: start > 0 ? { Range: `bytes=${start}-` } : {},
+        timeout: 2e4
+      });
+      if (start > 0 && response.status !== 206) {
+        start = 0;
+        await fs__namespace.truncate(dest, 0);
+      }
+      const totalLength = parseInt(response.headers["content-length"] || "0", 10) + start;
+      let downloaded = start;
+      await new Promise((resolve, reject) => {
+        const writer = fs__namespace.createWriteStream(dest, { flags: start > 0 && response.status === 206 ? "a" : "w" });
+        let stallTimer = setTimeout(() => {
+          writer.destroy();
+          reject(new Error("Stream stalled"));
+        }, 15e3);
+        response.data.on("data", (chunk) => {
+          clearTimeout(stallTimer);
+          stallTimer = setTimeout(() => {
+            writer.destroy();
+            reject(new Error("Stream stalled"));
+          }, 15e3);
+          downloaded += chunk.length;
+          const percent = totalLength > 0 ? Math.round(downloaded / totalLength * 100) : 0;
+          win?.webContents.send("download:progress", { name: label, percent, detail: `${formatBytes(downloaded)} / ${formatBytes(totalLength)}` });
+        });
+        response.data.pipe(writer);
+        writer.on("finish", () => {
+          clearTimeout(stallTimer);
+          resolve();
+        });
+        writer.on("error", (err) => {
+          clearTimeout(stallTimer);
+          writer.close();
+          reject(err);
+        });
+      });
+      return;
+    } catch (err) {
+      if (err.response && err.response.status === 416) {
+        await fs__namespace.remove(dest);
+      }
+      if (attempt === maxRetries) throw new Error(`Failed after 3 attempts: ${err.message}`);
+      await new Promise((r) => setTimeout(r, 2e3));
+    }
   }
-  const response = await axios({ method: "GET", url, responseType: "stream", timeout: 6e4 });
-  parseInt(response.headers["content-length"] || "0", 10);
-  let downloaded = 0;
-  await new Promise((resolve, reject) => {
-    const writer = fs__namespace.createWriteStream(dest);
-    response.data.on("data", (chunk) => {
-      downloaded += chunk.length;
-    });
-    response.data.pipe(writer);
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
 }
 async function downloadLibraries(libraries, gameDir, win) {
   const validLibs = libraries.filter((lib) => {
@@ -222,26 +278,25 @@ async function downloadLibraries(libraries, gameDir, win) {
     const artifact = lib.downloads.artifact;
     const dest = path__namespace.join(gameDir, "libraries", artifact.path);
     win?.webContents.send("download:progress", {
-      name: `Lib: ${lib.name.split(":")[1]}`,
-      downloaded: i + 1,
-      total: validLibs.length,
-      percent: Math.round((i + 1) / validLibs.length * 100)
+      name: `Library (${i + 1}/${validLibs.length})`,
+      percent: Math.round((i + 1) / validLibs.length * 100),
+      detail: lib.name.split(":")[1]
     });
     try {
-      await downloadFile(artifact.url, dest);
+      await downloadFile(artifact.url, dest, win, "Library");
     } catch (e) {
-      console.error(`Library failed: ${artifact.url}`);
+      console.error(e);
     }
   }
 }
 async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
   const assetIndexPath = path__namespace.join(gameDir, "assets", "indexes", `${assetIndexId}.json`);
-  await downloadFile(assetIndex.url, assetIndexPath);
+  await downloadFile(assetIndex.url, assetIndexPath, win, "Asset Index");
   const indexData = await fs__namespace.readJson(assetIndexPath);
   const objects = Object.values(indexData.objects);
   let done = 0;
   const total = objects.length;
-  const CONCURRENCY = 5;
+  const CONCURRENCY = 8;
   const queue = [...objects];
   async function worker() {
     while (queue.length > 0) {
@@ -249,18 +304,12 @@ async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
       const prefix = obj.hash.substring(0, 2);
       const dest = path__namespace.join(gameDir, "assets", "objects", prefix, obj.hash);
       try {
-        await downloadFile(`${RESOURCES_URL}/${prefix}/${obj.hash}`, dest);
+        await downloadFile(`${RESOURCES_URL}/${prefix}/${obj.hash}`, dest, null, "Asset");
       } catch (e) {
-        console.error(`Asset failed: ${obj.hash}`);
       }
       done++;
-      if (done % 20 === 0) {
-        win?.webContents.send("download:progress", {
-          name: "Downloading Assets...",
-          downloaded: done,
-          total,
-          percent: Math.round(done / total * 100)
-        });
+      if (done % 50 === 0 || done === total) {
+        win?.webContents.send("download:progress", { name: "Game Assets", percent: Math.round(done / total * 100), detail: `${done} / ${total} files` });
       }
     }
   }
@@ -269,16 +318,9 @@ async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
 function setupVersionHandlers(ipcMain, store2) {
   ipcMain.handle("versions:get-list", async () => {
     try {
-      const res = await axios.get(MANIFEST_URL, { timeout: 15e3 });
-      const manifest = res.data;
-      const supported = manifest.versions.filter((v) => {
-        if (v.type !== "release") return false;
-        const id = v.id;
-        if (/^\d{2,}\./.test(id)) return true;
-        const [, minor] = id.split(".").map(Number);
-        return minor >= 12;
-      });
-      return { success: true, versions: supported, latest: manifest.latest.release };
+      const res = await axios.get(MANIFEST_URL, { timeout: 1e4 });
+      const supported = res.data.versions.filter((v) => v.type === "release");
+      return { success: true, versions: supported };
     } catch (err) {
       return { success: false, error: err.message };
     }
@@ -287,24 +329,19 @@ function setupVersionHandlers(ipcMain, store2) {
     const win = electron.BrowserWindow.fromWebContents(event.sender);
     const gameDir = getGameDir$2();
     try {
-      win?.webContents.send("download:progress", { name: "Fetching manifest...", downloaded: 0, total: 1, percent: 5 });
-      const manifestRes = await axios.get(MANIFEST_URL, { timeout: 3e4 });
-      const lookupId = VERSION_ID_MAP[versionId] || versionId;
-      const versionMeta = manifestRes.data.versions.find((v) => v.id === lookupId || v.id === versionId);
-      if (!versionMeta) throw new Error(`Version ${versionId} not found in manifest. Check connection.`);
-      win?.webContents.send("download:progress", { name: "Downloading version data...", downloaded: 0, total: 1, percent: 10 });
-      const versionRes = await axios.get(versionMeta.url, { timeout: 3e4 });
+      win?.webContents.send("download:progress", { name: "Connecting...", percent: 5, detail: "Mojang API" });
+      const manifestRes = await axios.get(MANIFEST_URL, { timeout: 1e4 });
+      const versionMeta = manifestRes.data.versions.find((v) => v.id === versionId);
+      if (!versionMeta) throw new Error(`Version ${versionId} not found.`);
+      win?.webContents.send("download:progress", { name: "Parsing version...", percent: 10, detail: "" });
+      const versionRes = await axios.get(versionMeta.url, { timeout: 1e4 });
       const versionData = versionRes.data;
-      const actualId = versionData.id || versionId;
+      const actualId = versionData.id;
       const versionDir = path__namespace.join(gameDir, "versions", actualId);
       await fs__namespace.ensureDir(versionDir);
       await fs__namespace.writeJson(path__namespace.join(versionDir, `${actualId}.json`), versionData);
-      if (versionId !== actualId) {
-        store2.set(`versionIdMap.${versionId}`, actualId);
-      }
-      win?.webContents.send("download:progress", { name: "Downloading client.jar...", downloaded: 0, total: 1, percent: 15 });
       const clientJarPath = path__namespace.join(versionDir, `${actualId}.jar`);
-      await downloadFile(versionData.downloads.client.url, clientJarPath);
+      await downloadFile(versionData.downloads.client.url, clientJarPath, win, "Minecraft Core");
       await downloadLibraries(versionData.libraries, gameDir, win);
       await downloadAssets(versionData.assetIndex, versionData.assetIndex.id, gameDir, win);
       const nativesDir = path__namespace.join(versionDir, "natives");
@@ -329,7 +366,7 @@ function setupVersionHandlers(ipcMain, store2) {
         }
       }
       store2.set(`installed.${versionId}`, { id: versionId, actualId, installedAt: Date.now() });
-      win?.webContents.send("download:progress", { name: "Complete!", downloaded: 1, total: 1, percent: 100 });
+      win?.webContents.send("download:progress", { name: "Complete", percent: 100, detail: "Ready" });
       return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
