@@ -8,7 +8,7 @@ export default function HomePage() {
   const [instances, setInstances] = useState<Instance[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [editingInst, setEditingInst] = useState<Instance | null>(null)
-  const [console, setConsole] = useState<string[]>([])
+  const [consoleLogs, setConsoleLogs] = useState<string[]>([])
 
   async function loadInstances() {
     const r = await window.kazuki?.instance.getAll()
@@ -18,7 +18,7 @@ export default function HomePage() {
   useEffect(() => {
     loadInstances()
     window.kazuki?.on('instance:log', (msg: string) => {
-      setConsole(prev => [...prev.slice(-99), `[${new Date().toLocaleTimeString()}] ${msg}`])
+      setConsoleLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString()}] ${msg}`])
     })
     return () => { window.kazuki?.off('instance:log') }
   }, [])
@@ -30,17 +30,17 @@ export default function HomePage() {
 
   return (
     <div className={s.page}>
-      <div className={s.top}>
-        <div className={s.title}>Instances</div>
-        <button className={s.btn} onClick={() => setShowCreate(true)}>+ New Instance</button>
+      <div className={s.header}>
+        <div className={s.title}>Dashboard</div>
+        <button className={s.createBtn} onClick={() => setShowCreate(true)}>+ New Instance</button>
       </div>
 
       <div className={s.grid}>
         {instances.map(inst => (
           <div key={inst.id} className={s.card} onClick={() => launch(inst.id)}>
-            <div className={s.cardInfo}>
+            <div className={s.cardContent}>
               <div className={s.cardName}>{inst.name}</div>
-              <div className={s.cardVer}>{inst.mcVersion} • {inst.loader}</div>
+              <div className={s.cardDetails}>{inst.mcVersion} • {inst.loader}</div>
             </div>
             <button 
               className={s.editBtn} 
@@ -52,18 +52,15 @@ export default function HomePage() {
         ))}
       </div>
 
-      <div className={s.console}>
-        {console.map((line, i) => <div key={i}>{line}</div>)}
+      <div className={s.consoleContainer}>
+        <div className={s.consoleHeader}>System Logs</div>
+        <div className={s.console}>
+          {consoleLogs.map((log, i) => <div key={i}>{log}</div>)}
+        </div>
       </div>
 
       {showCreate && <CreateInstanceModal onClose={() => setShowCreate(false)} onCreated={loadInstances} />}
-      {editingInst && (
-        <InstanceSettingsModal 
-          instance={editingInst} 
-          onClose={() => setEditingInst(null)} 
-          onUpdated={loadInstances}
-        />
-      )}
+      {editingInst && <InstanceSettingsModal instance={editingInst} onClose={() => setEditingInst(null)} onUpdated={loadInstances} />}
     </div>
   )
 }
