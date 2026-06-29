@@ -62,20 +62,17 @@ function buildClasspath(libraries:any[], gameDir:string, versionId:string): stri
 async function findJava(custom?:string, mcVersion?:string): Promise<string> {
   if (custom?.trim() && await fs.pathExists(custom.trim())) return custom.trim()
 
-  // Try PATH first - works for Oracle, any installed Java
   try {
     const out = execSync('where javaw', {encoding:'utf8',timeout:3000}).trim()
     const first = out.split('\n')[0].trim()
     if (first && await fs.pathExists(first)) return first
   } catch {}
 
-  // JAVA_HOME
   if (process.env.JAVA_HOME) {
     const j = path.join(process.env.JAVA_HOME,'bin','javaw.exe')
     if (await fs.pathExists(j)) return j
   }
 
-  // Scan common paths
   const pf = process.env['ProgramFiles'] || 'C:\\Program Files'
   const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
   const vendors = ['Java','Eclipse Adoptium','Microsoft','Temurin','Zulu','BellSoft','Amazon Corretto','GraalVM','OpenJDK','Semeru']
@@ -96,7 +93,6 @@ async function findJava(custom?:string, mcVersion?:string): Promise<string> {
     }
   }
 
-  // Registry
   try {
     const reg = execSync('reg query "HKLM\\SOFTWARE\\JavaSoft\\Java Development Kit" /v CurrentVersion',{encoding:'utf8',timeout:3000})
     const vm = reg.match(/CurrentVersion\s+REG_SZ\s+(.+)/)
@@ -110,7 +106,8 @@ async function findJava(custom?:string, mcVersion?:string): Promise<string> {
     }
   } catch {}
 
-  return 'javaw'
+  // SILENT FAIL KO HATA DIYA HAI. EXPLICIT ERROR THROW KAREGA.
+  throw new Error('Java not found on your system. Please install Java 17/21 from Adoptium or specify the exact java path in Settings.');
 }
 
 function resolveArgs(args:string[], rep:Record<string,string>): string[] {
@@ -173,7 +170,6 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
       const settings:LauncherSettings=store.get('settings',{})
       const gameDir=getGameDir()
 
-      // Resolve actual version ID
       const meta=store.get(`installed.${inst.mcVersion}`)
       const actualId=meta?.actualId||inst.mcVersion
 
@@ -194,6 +190,7 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
       const classpath=buildClasspath(vd.libraries,gameDir,actualId)
       if(!classpath.trim()) throw new Error('Libraries missing — delete instance and reinstall with internet connection.')
 
+      // ERROR PROPAGATION: Agar findJava fail hua, catch block direct error ko UI par bhej dega
       const javaPath=await findJava((inst as any).javaPath||(settings as any).javaPath, inst.mcVersion)
       const jvmArgs=buildJvmArgs(inst.minRam||512,inst.maxRam||2048,nativesDir,(inst as any).customJvmArgs,inst.mcVersion)
 
@@ -226,6 +223,8 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
       const fullArgs=[...jvmArgs,'-cp',classpath,vd.mainClass,...gameArgs]
 
       const win=BrowserWindow.fromWebContents(event.sender)
+      
+      // Detached execute hoga, agar crash hua toh logs `.kazuki/instances/id/logs` me jayenge
       const child=spawn(javaPath,fullArgs,{cwd:instDir,detached:true,stdio:'ignore'})
       child.unref()
 

@@ -12,20 +12,16 @@ export default function HomePage({ account }: Props) {
   const [selectedId, setSelectedId] = useState<string|null>(null)
   const [launchState, setLaunchState] = useState<'idle'|'loading'|'launching'|'running'|'error'>('idle')
   const [launchError, setLaunchError] = useState('')
-  const [fps, setFps] = useState(247)
   const [showCreate, setShowCreate] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string|null>(null)
   const [playTime, setPlayTime] = useState(0) // seconds
   const [console_, setConsole] = useState<string[]>([])
   const [showConsole, setShowConsole] = useState(false)
-  const fpsRef = useRef<ReturnType<typeof setInterval>|null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
   useEffect(() => {
     loadInstances()
-    fpsRef.current = setInterval(() => setFps(Math.floor(200 + Math.random()*90)), 900)
     return () => {
-      if (fpsRef.current) clearInterval(fpsRef.current)
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [])
@@ -51,25 +47,28 @@ export default function HomePage({ account }: Props) {
     addLog(`Launching ${selected.name} (${selected.mcVersion} ${selected.loader})...`)
     addLog(`Java path: auto-detect`)
     addLog(`RAM: ${Math.round((selected.maxRam||2048)/1024)}G max`)
+    
     await new Promise(r => setTimeout(r, 800))
     setLaunchState('launching')
+    
     const r = await window.kazuki?.instance.launch(selected.id)
     if (r?.success) {
       setLaunchState('running')
       addLog(`Game launched successfully (PID: ${r.pid})`)
-      // Update Discord RPC
-      window.kazuki?.discord.set-state?.({
+      
+      // SYNTAX ERROR FIXED HERE: set-state to setState
+      window.kazuki?.discord.setState?.({
         details: `Playing ${selected.mcVersion}`,
         state: `${selected.name} — Kazuki Client`
       })
-      // Start timer
+      
       timerRef.current = setInterval(() => setPlayTime(p => p + 1), 1000)
     } else {
       setLaunchError(r?.error || 'Launch failed')
       setLaunchState('error')
       addLog(`ERROR: ${r?.error || 'Launch failed'}`)
       if (r?.error?.includes('ENOENT') || r?.error?.includes('javaw')) {
-        addLog('FIX: Install Java 21 from adoptium.net then set path in Settings')
+        addLog('FIX: Install Java 17/21 from adoptium.net then set path in Settings')
       }
       if (r?.error?.includes('not installed')) {
         addLog('FIX: Delete this instance and create a new one with "Install & Create"')
@@ -116,16 +115,11 @@ export default function HomePage({ account }: Props) {
 
   return (
     <div className={s.page}>
-      {/* Hero */}
       <div className={s.hero}>
         <div className={s.heroBg}/>
-        <div className={s.heroNebula}/>
-        <div className={s.heroGrid}/>
-        <div className={s.heroStars}/>
-        <div className={s.scanLine}/>
-
+        
         <div className={s.heroContent}>
-          <div className={s.eyebrow}>Performance Minecraft Client</div>
+          <div className={s.eyebrow}>Kazuki Client</div>
           <div className={s.titleRow}>
             <img src="logo32.png" className={s.titleLeaf} alt=""
               onError={e=>{(e.target as HTMLImageElement).style.display='none'}}/>
@@ -143,7 +137,7 @@ export default function HomePage({ account }: Props) {
                 {Math.round((selected.maxRam||2048)/1024)}G RAM
               </span>
               {launchState==='running' && (
-                <span className={s.chip} style={{color:'#4ade80',borderColor:'rgba(74,222,128,.4)',animation:'timerTick .5s ease-in-out infinite alternate'}}>
+                <span className={s.chip} style={{color:'#4ade80',borderColor:'rgba(74,222,128,.4)'}}>
                   {formatTime(playTime)}
                 </span>
               )}
@@ -151,17 +145,10 @@ export default function HomePage({ account }: Props) {
           )}
         </div>
 
-        <div className={s.fpsBox}>
-          <div className={s.fpsNum}>{fps}</div>
-          <div className={s.fpsLbl}>FPS</div>
-          <div className={s.fpsDot}/>
-        </div>
-
-        {/* Launch bar */}
         <div className={s.launchBar}>
           {selected ? (
             <div className={s.activeInst}>
-              <div className={s.instIcon} style={{background:`${icolor}18`,borderColor:`${icolor}44`}}>
+              <div className={s.instIcon} style={{background:`${icolor}10`,borderColor:`${icolor}30`}}>
                 <span style={{color:icolor,fontFamily:'var(--disp)',fontWeight:700,fontSize:13}}>{itext}</span>
               </div>
               <div>
@@ -170,7 +157,7 @@ export default function HomePage({ account }: Props) {
               </div>
             </div>
           ) : (
-            <div className={s.noInst}>No instance — create one</div>
+            <div className={s.noInst}>No instance selected</div>
           )}
           <div style={{flex:1}}/>
           {launchError && <span className={s.errTxt} title={launchError}>{launchError.substring(0,40)}...</span>}
@@ -184,20 +171,19 @@ export default function HomePage({ account }: Props) {
           <button type="button" className={s.newBtn} onClick={()=>setShowCreate(true)}>+ New</button>
           {launchState === 'running' ? (
             <button type="button" className={`${s.launchBtn} ${s.stopBtn}`} onClick={stopGame}>
-              <span className={s.shine}/>STOP
+              STOP
             </button>
           ) : (
             <button type="button"
               className={`${s.launchBtn} ${launchState!=='idle'?s[launchState]:''}`}
               onClick={handleLaunch}
               disabled={launchState!=='idle'||!selected}>
-              <span className={s.shine}/>{lbl}
+              {lbl}
             </button>
           )}
         </div>
       </div>
 
-      {/* Console */}
       {showConsole && (
         <div className={s.consolePanel}>
           <div className={s.consoleHeader}>
@@ -216,7 +202,6 @@ export default function HomePage({ account }: Props) {
         </div>
       )}
 
-      {/* Instances */}
       <div className={s.body}>
         <div className={s.secHeader}>
           <div className={s.secTitle}>Instances</div>
@@ -225,7 +210,6 @@ export default function HomePage({ account }: Props) {
 
         {instances.length === 0 ? (
           <div className={s.empty}>
-            <img src="logo.png" style={{width:52,height:52,opacity:.25}} alt="" onError={e=>{(e.target as HTMLImageElement).style.display='none'}}/>
             <div className={s.emptyTitle}>No instances yet</div>
             <div className={s.emptyDesc}>Create your first instance to start playing</div>
             <button type="button" className={s.emptyBtn} onClick={()=>setShowCreate(true)}>Create Instance</button>
@@ -243,7 +227,7 @@ export default function HomePage({ account }: Props) {
                   onClick={()=>setSelectedId(inst.id)}
                   style={{animationDelay:`${i*.05}s`}}>
                   <div className={s.cardTopBar} style={{background:`linear-gradient(90deg,transparent,${ic},transparent)`}}/>
-                  <div className={s.cardIcon} style={{background:`${ic}18`,borderColor:`${ic}44`}}>
+                  <div className={s.cardIcon} style={{background:`${ic}10`,borderColor:`${ic}30`}}>
                     <span style={{color:ic,fontFamily:'var(--disp)',fontWeight:700,fontSize:16}}>{it}</span>
                   </div>
                   <div className={s.cardName}>{inst.name}</div>
@@ -265,18 +249,16 @@ export default function HomePage({ account }: Props) {
         )}
       </div>
 
-      {/* Custom confirm delete */}
       {confirmDelete && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.75)',backdropFilter:'blur(8px)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:998,animation:'fadeIn .15s ease'}}>
           <div style={{
-            background:'linear-gradient(145deg,rgba(20,19,50,.98),rgba(10,9,30,.98))',
-            border:'1px solid rgba(244,63,94,.2)',borderRadius:16,padding:28,width:320,
-            boxShadow:'0 24px 60px rgba(0,0,0,.9),0 0 0 1px rgba(244,63,94,.1)',
+            background:'#0d0d12',
+            border:'1px solid rgba(255,255,255,0.08)',borderRadius:12,padding:28,width:320,
+            boxShadow:'0 24px 60px rgba(0,0,0,.9)',
             animation:'slideUp .22s var(--smooth)'
           }}>
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
-              <div style={{width:36,height:36,borderRadius:'50%',background:'rgba(244,63,94,.1)',border:'1px solid rgba(244,63,94,.25)',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--red)',fontSize:16}}>✕</div>
-              <div style={{fontSize:15,fontWeight:600,color:'var(--t1)'}}>Delete Instance</div>
+              <div style={{fontSize:15,fontWeight:600,color:'var(--t1)'}}>Delete Instance?</div>
             </div>
             <div style={{fontSize:13,color:'var(--t2)',marginBottom:20,lineHeight:1.6}}>
               This removes the instance profile. Your saves and mods files are kept in AppData.
@@ -287,9 +269,8 @@ export default function HomePage({ account }: Props) {
                 color:'var(--t2)',borderRadius:8,fontSize:13,fontWeight:500,cursor:'pointer'
               }}>Cancel</button>
               <button type="button" onClick={()=>handleDelete(confirmDelete)} style={{
-                flex:1,padding:'10px',background:'linear-gradient(135deg,rgba(244,63,94,.9),rgba(153,27,34,.9))',
+                flex:1,padding:'10px',background:'#dc2626',
                 border:'none',color:'#fff',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',
-                boxShadow:'0 4px 14px rgba(244,63,94,.3)'
               }}>Delete</button>
             </div>
           </div>
