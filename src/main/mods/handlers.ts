@@ -12,36 +12,31 @@ function getGameDir(): string {
 }
 
 export function setupModHandlers(ipcMain: IpcMain, store: Store) {
-  ipcMain.handle('mods:search', async (_, { query, source, mcVersion, projectType, category }) => {
+  ipcMain.handle('mods:search', async (_, { query, source, mcVersion, projectType, category, offset = 0 }) => {
     try {
       const loader = source.toLowerCase(); 
       const facets: string[][] = [
         [`versions:${mcVersion}`],
-        [`project_type:${projectType}`] // mod, resourcepack, shader
+        [`project_type:${projectType}`]
       ];
       
-      // Loaders matter for mods, but not strictly for resource packs/shaders
-      if (projectType === 'mod') {
-        facets.push([`categories:${loader}`]);
-      }
-      if (category && category !== 'all') {
-        facets.push([`categories:${category}`]);
-      }
+      if (projectType === 'mod') facets.push([`categories:${loader}`]);
+      if (category && category !== 'all') facets.push([`categories:${category}`]);
       
       const res = await axios.get(`${API_BASE}/search`, {
         params: {
-          query: query || '', // Empty query allows fetching popular content
+          query: query || '',
           facets: JSON.stringify(facets),
-          index: 'downloads', // Sort by popularity by default
-          limit: 30
+          index: 'downloads',
+          limit: 30,
+          offset: offset // PAGINATION ADDED
         },
         timeout: 10000
       });
       
-      return { success: true, results: res.data.hits };
+      return { success: true, results: res.data.hits, total: res.data.total_hits };
     } catch (error: any) {
-      console.error('Mod search error:', error.message);
-      return { success: false, error: 'Failed to search Modrinth. Check network.' };
+      return { success: false, error: 'Failed to search Modrinth.' };
     }
   });
 
@@ -51,14 +46,10 @@ export function setupModHandlers(ipcMain: IpcMain, store: Store) {
       const inst = all.find((i: any) => i.id === instanceId);
       if (!inst) throw new Error('Instance not found');
 
-      // Modrinth needs loader parameter only for actual mods
       const loaders = mod.project_type === 'mod' ? JSON.stringify([inst.loader]) : undefined;
       
       const verRes = await axios.get(`${API_BASE}/project/${mod.project_id}/version`, {
-        params: {
-          loaders: loaders,
-          game_versions: JSON.stringify([inst.mcVersion])
-        },
+        params: { loaders: loaders, game_versions: JSON.stringify([inst.mcVersion]) },
         timeout: 10000
       });
 
@@ -66,7 +57,6 @@ export function setupModHandlers(ipcMain: IpcMain, store: Store) {
       
       const file = verRes.data[0].files.find((f: any) => f.primary) || verRes.data[0].files[0];
       
-      // Logic for correct directory routing
       let folderName = 'mods';
       if (mod.project_type === 'resourcepack') folderName = 'resourcepacks';
       if (mod.project_type === 'shader') folderName = 'shaderpacks';
@@ -90,7 +80,6 @@ export function setupModHandlers(ipcMain: IpcMain, store: Store) {
     }
   });
 
-  // Retrieves installed items from all three folders
   ipcMain.handle('mods:get-installed', async (_, instanceId) => {
     try {
       const instDir = path.join(getGameDir(), 'instances', instanceId);

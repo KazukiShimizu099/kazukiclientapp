@@ -17,18 +17,29 @@ export default function ModsPage() {
   const [installedMods, setInstalledMods] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<string|null>(null)
+  
+  const [offset, setOffset] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
 
   useEffect(() => { loadInstances() }, [])
 
   useEffect(() => {
     if (selectedInstId) {
-      loadInstalled() // Always load local files to track installation state
-      if (tab === 'search') executeSearch()
+      loadInstalled()
+      if (tab === 'search') {
+        setOffset(0)
+        executeSearch(0)
+      }
     }
   }, [selectedInstId, tab, projectType, category])
 
   useEffect(() => {
-    const timeout = setTimeout(() => { if (selectedInstId && tab === 'search') executeSearch() }, 500)
+    const timeout = setTimeout(() => { 
+      if (selectedInstId && tab === 'search') {
+        setOffset(0)
+        executeSearch(0)
+      }
+    }, 500)
     return () => clearTimeout(timeout)
   }, [query])
 
@@ -46,28 +57,41 @@ export default function ModsPage() {
     if (r?.success) setInstalledMods(r.mods)
   }
 
-  async function executeSearch() {
+  async function executeSearch(currentOffset: number = 0) {
     const inst = instances.find(i => i.id === selectedInstId)
     if (!inst) return
 
     setLoading(true)
     const r = await window.kazuki?.mods.search({
-      query, source: inst.loader, mcVersion: inst.mcVersion, projectType, category
+      query, source: inst.loader, mcVersion: inst.mcVersion, projectType, category, offset: currentOffset
     })
     
-    if (r?.success) setResults(r.results)
-    else setResults([])
+    if (r?.success) {
+      if (currentOffset === 0) setResults(r.results)
+      else setResults(prev => [...prev, ...r.results])
+      setHasMore(r.results.length === 30) // If it returned 30, there's probably more
+    } else {
+      if (currentOffset === 0) setResults([])
+    }
     setLoading(false)
+  }
+
+  function handleLoadMore() {
+    const nextOffset = offset + 30;
+    setOffset(nextOffset);
+    executeSearch(nextOffset);
+  }
+
+  async function handleOpenFolder() {
+    if (!selectedInstId) return;
+    await window.kazuki?.instance.openFolder(selectedInstId);
   }
 
   async function handleInstall(mod: any) {
     setActionLoading(mod.project_id)
     const r = await window.kazuki?.mods.install({ mod, instanceId: selectedInstId })
-    if (r?.success) {
-      loadInstalled() // Background refresh triggers button update
-    } else {
-      alert(`Install Failed: ${r.error}`)
-    }
+    if (r?.success) loadInstalled()
+    else alert(`Install Failed: ${r.error}`)
     setActionLoading(null)
   }
 
@@ -92,11 +116,20 @@ export default function ModsPage() {
     <div className={s.page}>
       <div className={s.header}>
         <div className={s.headerTitle}>Content Manager</div>
-        <select className={s.instSelect} value={selectedInstId} onChange={e => setSelectedInstId(e.target.value)}>
-          {instances.map(i => (
-            <option key={i.id} value={i.id}>{i.name} ({i.mcVersion} - {i.loader})</option>
-          ))}
-        </select>
+        <div style={{display:'flex', gap: '10px'}}>
+          <button onClick={handleOpenFolder} style={{
+            padding: '8px 16px', background: 'rgba(255,255,255,0.05)', 
+            border: '1px solid rgba(255,255,255,0.1)', color: '#fff', 
+            borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
+          }}>
+            📁 Open Folder
+          </button>
+          <select className={s.instSelect} value={selectedInstId} onChange={e => setSelectedInstId(e.target.value)}>
+            {instances.map(i => (
+              <option key={i.id} value={i.id}>{i.name} ({i.mcVersion} - {i.loader})</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className={s.tabs}>
@@ -115,7 +148,7 @@ export default function ModsPage() {
               </div>
               <input 
                 className={s.searchBar} type="text" 
-                placeholder={`Search popular ${projectType}s...`} 
+                placeholder={`Search ${projectType}s...`} 
                 value={query} onChange={e => setQuery(e.target.value)}
               />
             </div>
@@ -131,9 +164,7 @@ export default function ModsPage() {
             )}
             
             <div className={s.grid}>
-              {loading && <div className={s.noRes}>Loading data from Modrinth...</div>}
-              {!loading && results.map(mod => {
-                // Filename validation logic
+              {results.map(mod => {
                 const isInstalled = installedMods.some(im => im.filename.toLowerCase().includes(mod.slug.toLowerCase()));
                 return (
                   <div key={mod.project_id} className={s.card}>
@@ -155,14 +186,28 @@ export default function ModsPage() {
                   </div>
                 )
               })}
-              {results.length === 0 && !loading && <div className={s.noRes}>No results found</div>}
+              
+              {loading && <div className={s.noRes}>Loading data from Modrinth...</div>}
+              {!loading && results.length === 0 && <div className={s.noRes}>No results found</div>}
+              
+              {!loading && results.length > 0 && hasMore && (
+                <button 
+                  onClick={handleLoadMore} 
+                  style={{
+                    padding: '12px', background: 'rgba(255,255,255,0.05)', 
+                    border: '1px solid rgba(255,255,255,0.1)', color: '#fff', 
+                    borderRadius: '8px', cursor: 'pointer', marginTop: '10px'
+                  }}>
+                  Load More Content
+                </button>
+              )}
             </div>
           </>
         )}
 
         {tab === 'installed' && (
           <div className={s.grid}>
-            {!loading && installedMods.length === 0 && <div className={s.noRes}>No content installed.</div>}
+            {installedMods.length === 0 && <div className={s.noRes}>No content installed.</div>}
             {installedMods.map(mod => (
               <div key={mod.id} className={s.card}>
                 <div className={s.iconFallback}>{mod.folder === 'mods' ? 'JAR' : 'ZIP'}</div>

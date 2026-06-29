@@ -1,12 +1,20 @@
-import { IpcMain, BrowserWindow } from 'electron'
+import { IpcMain, BrowserWindow, shell, app } from 'electron'
 import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs-extra'
-import { app } from 'electron'
 import { v4 as uuidv4 } from 'uuid'
 import axios from 'axios'
 import AdmZip from 'adm-zip'
 import type { Instance, LauncherSettings } from '../../shared/types'
+
+const activeProcesses = new Map<string, any>() // Tracks running instances
+
+// Client close hone par saare games force close karne ka logic
+app.on('before-quit', () => {
+  for (const [id, child] of activeProcesses.entries()) {
+    try { child.kill('SIGKILL') } catch (e) {}
+  }
+})
 
 function getGameDir(): string {
   return path.join(app.getPath('appData'), '.kazuki')
@@ -164,6 +172,17 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     }catch(e:any){return{success:false,error:e.message}}
   })
 
+  ipcMain.handle('instance:open-folder', async (_, instanceId: string) => {
+    try {
+      const dir = path.join(getGameDir(), 'instances', instanceId);
+      await fs.ensureDir(dir);
+      await shell.openPath(dir);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  });
+
   ipcMain.handle('instance:launch',async(event,instanceId:string)=>{
     try{
       const all:Instance[]=store.get('instances',[])
@@ -229,8 +248,16 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
 
       const win=BrowserWindow.fromWebContents(event.sender)
       
-      const child=spawn(javaPath,fullArgs,{cwd:instDir,detached:true,stdio:'ignore'})
-      child.unref()
+      // Detached hataya gaya hai. IPC events add kiye gaye hain.
+      const child=spawn(javaPath,fullArgs,{cwd:instDir,stdio:'ignore'})
+      activeProcesses.set(instanceId, child)
+
+      child.on('exit', (code) => {
+        activeProcesses.delete(instanceId)
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('instance:exit', { instanceId, code })
+        }
+      })
 
       const idx=all.findIndex((i:any)=>i.id===instanceId)
       if(idx!==-1){ all[idx].lastPlayed=Date.now(); store.set('instances',all) }

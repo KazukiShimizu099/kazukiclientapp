@@ -15,8 +15,6 @@ const NAV_TOP = [
     icon:<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1L13 4.5V11L7.5 14.5L2 11V4.5L7.5 1Z" stroke="currentColor" strokeWidth="1.2"/><circle cx="7.5" cy="7.5" r="2" stroke="currentColor" strokeWidth="1.2"/></svg> },
   { id:'hud'     as TabId, label:'HUD Modules',
     icon:<svg width="15" height="15" viewBox="0 0 15 15" fill="none"><rect x="1" y="1" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.2"/><rect x="2.5" y="2.5" width="4" height="3" rx=".5" stroke="currentColor" strokeWidth=".9"/><rect x="8.5" y="2.5" width="4" height="3" rx=".5" stroke="currentColor" strokeWidth=".9"/><rect x="2.5" y="7.5" width="10" height="1" fill="currentColor" opacity=".35"/></svg> },
-  { id:'discord' as TabId, label:'Discord RPC',
-    icon:<svg width="15" height="12" viewBox="0 0 71 55" fill="currentColor"><path d="M60.1 4.9A58.5 58.5 0 0 0 45.5.4a.2.2 0 0 0-.2.1c-.6 1.1-1.3 2.6-1.8 3.7a54 54 0 0 0-16.2 0 37.4 37.4 0 0 0-1.8-3.7.2.2 0 0 0-.2-.1A58.4 58.4 0 0 0 10.9 4.9a.2.2 0 0 0-.1.1C1.6 18.1-1 30.9.3 43.5a.2.2 0 0 0 .1.2 58.8 58.8 0 0 0 17.7 9 .2.2 0 0 0 .2-.1c1.4-1.9 2.6-3.9 3.6-6a.2.2 0 0 0-.1-.3 38.7 38.7 0 0 1-5.5-2.6.2.2 0 0 1 0-.4c.4-.3.7-.6 1.1-.9a.2.2 0 0 1 .2 0c11.5 5.3 24 5.3 35.4 0a.2.2 0 0 1 .2 0c.4.3.8.6 1.1.9a.2.2 0 0 1 0 .4 36.1 36.1 0 0 1-5.5 2.6.2.2 0 0 0-.1.3c1.1 2.1 2.3 4.1 3.6 6a.2.2 0 0 0 .2.1 58.6 58.6 0 0 0 17.8-9 .2.2 0 0 0 .1-.2C73 28.9 69.7 16.2 60.2 5a.2.2 0 0 0-.1-.1z"/></svg> },
 ]
 
 const NAV_BOT = [

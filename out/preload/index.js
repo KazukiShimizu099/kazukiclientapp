@@ -22,25 +22,19 @@ electron.contextBridge.exposeInMainWorld("kazuki", {
     create: (data) => electron.ipcRenderer.invoke("instance:create", data),
     delete: (id) => electron.ipcRenderer.invoke("instance:delete", id),
     getAll: () => electron.ipcRenderer.invoke("instance:get-all"),
-    launch: (id) => electron.ipcRenderer.invoke("instance:launch", id)
+    launch: (id) => electron.ipcRenderer.invoke("instance:launch", id),
+    openFolder: (id) => electron.ipcRenderer.invoke("instance:open-folder", id)
   },
   mods: {
-    search: (q, src, ver) => electron.ipcRenderer.invoke("mods:search", { query: q, source: src, mcVersion: ver }),
-    install: (mod, instId) => electron.ipcRenderer.invoke("mods:install", { mod, instanceId: instId }),
+    search: (data) => electron.ipcRenderer.invoke("mods:search", data),
+    install: (data) => electron.ipcRenderer.invoke("mods:install", data),
     getInstalled: (instId) => electron.ipcRenderer.invoke("mods:get-installed", instId),
-    remove: (modId, instId) => electron.ipcRenderer.invoke("mods:remove", { modId, instanceId: instId })
+    remove: (data) => electron.ipcRenderer.invoke("mods:remove", data)
   },
   settings: {
     get: () => electron.ipcRenderer.invoke("settings:get"),
     set: (k, v) => electron.ipcRenderer.invoke("settings:set", { key: k, value: v }),
     systemInfo: () => electron.ipcRenderer.invoke("settings:system-info")
-  },
-  discord: {
-    getConfig: () => electron.ipcRenderer.invoke("discord:get-config"),
-    setConfig: (cfg) => electron.ipcRenderer.invoke("discord:set-config", cfg),
-    setState: (s) => electron.ipcRenderer.invoke("discord:set-state", s),
-    reconnect: () => electron.ipcRenderer.invoke("discord:reconnect"),
-    getStatus: () => electron.ipcRenderer.invoke("discord:get-status")
   },
   on: (channel, cb) => {
     const h = (_, ...a) => cb(...a);

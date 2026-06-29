@@ -19,10 +19,11 @@ contextBridge.exposeInMainWorld('kazuki', {
     install: (versionId:string)       => ipcRenderer.invoke('versions:install', versionId),
   },
   instance: {
-    create:  (data:any)               => ipcRenderer.invoke('instance:create', data),
-    delete:  (id:string)              => ipcRenderer.invoke('instance:delete', id),
-    getAll:  ()                       => ipcRenderer.invoke('instance:get-all'),
-    launch:  (id:string)              => ipcRenderer.invoke('instance:launch', id),
+    create:     (data:any)  => ipcRenderer.invoke('instance:create', data),
+    delete:     (id:string) => ipcRenderer.invoke('instance:delete', id),
+    getAll:     ()          => ipcRenderer.invoke('instance:get-all'),
+    launch:     (id:string) => ipcRenderer.invoke('instance:launch', id),
+    openFolder: (id:string) => ipcRenderer.invoke('instance:open-folder', id),
   },
   mods: {
     search:       (data:any) => ipcRenderer.invoke('mods:search', data),
@@ -34,13 +35,6 @@ contextBridge.exposeInMainWorld('kazuki', {
     get:        ()                    => ipcRenderer.invoke('settings:get'),
     set:        (k:string,v:any)      => ipcRenderer.invoke('settings:set',{key:k,value:v}),
     systemInfo: ()                    => ipcRenderer.invoke('settings:system-info'),
-  },
-  discord: {
-    getConfig:  ()                    => ipcRenderer.invoke('discord:get-config'),
-    setConfig:  (cfg:any)             => ipcRenderer.invoke('discord:set-config',cfg),
-    setState:   (s:any)               => ipcRenderer.invoke('discord:set-state',s),
-    reconnect:  ()                    => ipcRenderer.invoke('discord:reconnect'),
-    getStatus:  ()                    => ipcRenderer.invoke('discord:get-status'),
   },
   on:  (channel:string, cb:(...args:any[])=>void) => {
     const h = (_:any,...a:any[]) => cb(...a)

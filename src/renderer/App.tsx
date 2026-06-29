@@ -5,13 +5,12 @@ import HomePage from './pages/HomePage'
 import ModsPage from './pages/ModsPage'
 import HudPage from './pages/HudPage'
 import SettingsPage from './pages/SettingsPage'
-import DiscordPage from './pages/DiscordPage'
 import LegalPage from './pages/LegalPage'
 import AuthModal from './components/AuthModal'
 import AccountsModal from './components/AccountsModal'
 import type { Account } from './types'
 
-export type TabId = 'home' | 'mods' | 'hud' | 'discord' | 'settings' | 'legal'
+export type TabId = 'home' | 'mods' | 'hud' | 'settings' | 'legal'
 declare global { interface Window { kazuki: any } }
 
 export default function App() {
@@ -23,15 +22,33 @@ export default function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let isMounted = true;
     async function init() {
-      const saved = (await window.kazuki?.settings.get())?.settings?.accounts || []
-      const active = await window.kazuki?.auth.getAccount()
-      setAccounts(saved)
-      setActiveAccount(active)
-      if (!active) setShowAuth(true)
-      setLoading(false)
+      try {
+        // 5 Second Fail-Safe Timeout. Agar IPC bridge fail ho, toh app atakegi nahi.
+        const [settingsRes, activeAcc] = await Promise.race([
+          Promise.all([
+            window.kazuki?.settings.get(),
+            window.kazuki?.auth.getAccount()
+          ]),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Backend Timeout')), 5000))
+        ]) as any;
+
+        if (!isMounted) return;
+        
+        const saved = settingsRes?.settings?.accounts || []
+        setAccounts(saved)
+        setActiveAccount(activeAcc)
+        if (!activeAcc) setShowAuth(true)
+      } catch (error) {
+        console.error("Client Init Error:", error);
+        if (isMounted) setShowAuth(true); // Fallback to auth on error
+      } finally {
+        if (isMounted) setLoading(false)
+      }
     }
     init()
+    return () => { isMounted = false }
   }, [])
 
   async function handleAddAccount(acc: Account) {
@@ -40,7 +57,6 @@ export default function App() {
     setActiveAccount(acc)
     await window.kazuki?.settings.set('accounts', next)
     setShowAuth(false)
-    window.kazuki?.discord.setConfig?.({ state: `Logged in as ${acc.username}` })
   }
 
   async function handleSwitchAccount(acc: Account) {
@@ -85,7 +101,6 @@ export default function App() {
           {tab === 'home'     && <HomePage account={activeAccount}/>}
           {tab === 'mods'     && <ModsPage/>}
           {tab === 'hud'      && <HudPage/>}
-          {tab === 'discord'  && <DiscordPage/>}
           {tab === 'settings' && <SettingsPage/>}
           {tab === 'legal'    && <LegalPage/>}
         </main>

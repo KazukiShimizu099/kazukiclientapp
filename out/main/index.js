@@ -3,10 +3,10 @@ const electron = require("electron");
 const path = require("path");
 const axios = require("axios");
 const crypto = require("crypto");
-const child_process = require("child_process");
 const fs = require("fs-extra");
-const uuid = require("uuid");
 const AdmZip = require("adm-zip");
+const child_process = require("child_process");
+const uuid = require("uuid");
 const os = require("os");
 const discordRpc = require("discord-rpc");
 const Store = require("electron-store");
@@ -176,29 +176,175 @@ function setupAuthHandlers(ipcMain, store2) {
     }
   });
 }
+const MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
+const RESOURCES_URL = "https://resources.download.minecraft.net";
+const VERSION_ID_MAP = {
+  "26.1.1": "26.1.1",
+  "26.1": "26.1"
+};
+function getGameDir$2() {
+  return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
+}
+async function downloadFile(url, dest, onProgress) {
+  await fs__namespace.ensureDir(path__namespace.dirname(dest));
+  if (await fs__namespace.pathExists(dest)) {
+    const stat = await fs__namespace.stat(dest);
+    if (stat.size > 0) return;
+  }
+  const response = await axios({ method: "GET", url, responseType: "stream", timeout: 6e4 });
+  parseInt(response.headers["content-length"] || "0", 10);
+  let downloaded = 0;
+  await new Promise((resolve, reject) => {
+    const writer = fs__namespace.createWriteStream(dest);
+    response.data.on("data", (chunk) => {
+      downloaded += chunk.length;
+    });
+    response.data.pipe(writer);
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+}
+async function downloadLibraries(libraries, gameDir, win) {
+  const validLibs = libraries.filter((lib) => {
+    if (!lib.downloads?.artifact) return false;
+    if (lib.rules) {
+      for (const rule of lib.rules) {
+        if (rule.os) {
+          if (rule.action === "allow" && rule.os?.name !== "windows") return false;
+          if (rule.action === "disallow" && rule.os?.name === "windows") return false;
+        }
+      }
+    }
+    return true;
+  });
+  for (let i = 0; i < validLibs.length; i++) {
+    const lib = validLibs[i];
+    const artifact = lib.downloads.artifact;
+    const dest = path__namespace.join(gameDir, "libraries", artifact.path);
+    win?.webContents.send("download:progress", {
+      name: `Lib: ${lib.name.split(":")[1]}`,
+      downloaded: i + 1,
+      total: validLibs.length,
+      percent: Math.round((i + 1) / validLibs.length * 100)
+    });
+    try {
+      await downloadFile(artifact.url, dest);
+    } catch (e) {
+      console.error(`Library failed: ${artifact.url}`);
+    }
+  }
+}
+async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
+  const assetIndexPath = path__namespace.join(gameDir, "assets", "indexes", `${assetIndexId}.json`);
+  await downloadFile(assetIndex.url, assetIndexPath);
+  const indexData = await fs__namespace.readJson(assetIndexPath);
+  const objects = Object.values(indexData.objects);
+  let done = 0;
+  const total = objects.length;
+  const CONCURRENCY = 5;
+  const queue = [...objects];
+  async function worker() {
+    while (queue.length > 0) {
+      const obj = queue.pop();
+      const prefix = obj.hash.substring(0, 2);
+      const dest = path__namespace.join(gameDir, "assets", "objects", prefix, obj.hash);
+      try {
+        await downloadFile(`${RESOURCES_URL}/${prefix}/${obj.hash}`, dest);
+      } catch (e) {
+        console.error(`Asset failed: ${obj.hash}`);
+      }
+      done++;
+      if (done % 20 === 0) {
+        win?.webContents.send("download:progress", {
+          name: "Downloading Assets...",
+          downloaded: done,
+          total,
+          percent: Math.round(done / total * 100)
+        });
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+}
 function setupVersionHandlers(ipcMain, store2) {
   ipcMain.handle("versions:get-list", async () => {
     try {
-      const res = await axios.get("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", { timeout: 7e3 });
-      const versions = [];
-      let stop = false;
-      for (const v of res.data.versions) {
-        if (v.type === "release" && !stop) {
-          versions.push(v.id);
-          if (v.id === "1.8") stop = true;
-        }
-      }
-      return { success: true, versions };
-    } catch (error) {
-      console.error("Failed to fetch Mojang versions:", error.message);
-      return { success: true, versions: ["1.21.1", "1.20.6", "1.20.4", "1.19.4", "1.18.2", "1.16.5", "1.8.9"] };
+      const res = await axios.get(MANIFEST_URL, { timeout: 15e3 });
+      const manifest = res.data;
+      const supported = manifest.versions.filter((v) => {
+        if (v.type !== "release") return false;
+        const id = v.id;
+        if (/^\d{2,}\./.test(id)) return true;
+        const [, minor] = id.split(".").map(Number);
+        return minor >= 12;
+      });
+      return { success: true, versions: supported, latest: manifest.latest.release };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   });
-  ipcMain.handle("versions:install", async (_, versionId) => {
-    store2.set(`installed.${versionId}`, { actualId: versionId, installedAt: Date.now() });
-    return { success: true };
+  ipcMain.handle("versions:install", async (event, versionId) => {
+    const win = electron.BrowserWindow.fromWebContents(event.sender);
+    const gameDir = getGameDir$2();
+    try {
+      win?.webContents.send("download:progress", { name: "Fetching manifest...", downloaded: 0, total: 1, percent: 5 });
+      const manifestRes = await axios.get(MANIFEST_URL, { timeout: 3e4 });
+      const lookupId = VERSION_ID_MAP[versionId] || versionId;
+      const versionMeta = manifestRes.data.versions.find((v) => v.id === lookupId || v.id === versionId);
+      if (!versionMeta) throw new Error(`Version ${versionId} not found in manifest. Check connection.`);
+      win?.webContents.send("download:progress", { name: "Downloading version data...", downloaded: 0, total: 1, percent: 10 });
+      const versionRes = await axios.get(versionMeta.url, { timeout: 3e4 });
+      const versionData = versionRes.data;
+      const actualId = versionData.id || versionId;
+      const versionDir = path__namespace.join(gameDir, "versions", actualId);
+      await fs__namespace.ensureDir(versionDir);
+      await fs__namespace.writeJson(path__namespace.join(versionDir, `${actualId}.json`), versionData);
+      if (versionId !== actualId) {
+        store2.set(`versionIdMap.${versionId}`, actualId);
+      }
+      win?.webContents.send("download:progress", { name: "Downloading client.jar...", downloaded: 0, total: 1, percent: 15 });
+      const clientJarPath = path__namespace.join(versionDir, `${actualId}.jar`);
+      await downloadFile(versionData.downloads.client.url, clientJarPath);
+      await downloadLibraries(versionData.libraries, gameDir, win);
+      await downloadAssets(versionData.assetIndex, versionData.assetIndex.id, gameDir, win);
+      const nativesDir = path__namespace.join(versionDir, "natives");
+      await fs__namespace.ensureDir(nativesDir);
+      for (const lib of versionData.libraries) {
+        if (lib.downloads?.classifiers) {
+          const native = lib.downloads.classifiers["natives-windows"] || lib.downloads.classifiers["natives-windows-64"];
+          if (native) {
+            const nativeJar = path__namespace.join(gameDir, "libraries", native.path);
+            if (await fs__namespace.pathExists(nativeJar)) {
+              try {
+                const zip = new AdmZip(nativeJar);
+                zip.getEntries().forEach((entry) => {
+                  if (!entry.entryName.startsWith("META-INF") && entry.entryName.endsWith(".dll")) {
+                    zip.extractEntryTo(entry, nativesDir, false, true);
+                  }
+                });
+              } catch {
+              }
+            }
+          }
+        }
+      }
+      store2.set(`installed.${versionId}`, { id: versionId, actualId, installedAt: Date.now() });
+      win?.webContents.send("download:progress", { name: "Complete!", downloaded: 1, total: 1, percent: 100 });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   });
 }
+const activeProcesses = /* @__PURE__ */ new Map();
+electron.app.on("before-quit", () => {
+  for (const [id, child] of activeProcesses.entries()) {
+    try {
+      child.kill("SIGKILL");
+    } catch (e) {
+    }
+  }
+});
 function getGameDir$1() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
 }
@@ -344,6 +490,16 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       return { success: false, error: e.message };
     }
   });
+  ipcMain.handle("instance:open-folder", async (_, instanceId) => {
+    try {
+      const dir = path__namespace.join(getGameDir$1(), "instances", instanceId);
+      await fs__namespace.ensureDir(dir);
+      await electron.shell.openPath(dir);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
   ipcMain.handle("instance:launch", async (event, instanceId) => {
     try {
       const all = store2.get("instances", []);
@@ -398,8 +554,14 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       const gameArgs = resolveArgs(rawArgs, rep);
       const fullArgs = [...jvmArgs, "-cp", classpath, vd.mainClass, ...gameArgs];
       const win = electron.BrowserWindow.fromWebContents(event.sender);
-      const child = child_process.spawn(javaPath, fullArgs, { cwd: instDir, detached: true, stdio: "ignore" });
-      child.unref();
+      const child = child_process.spawn(javaPath, fullArgs, { cwd: instDir, stdio: "ignore" });
+      activeProcesses.set(instanceId, child);
+      child.on("exit", (code) => {
+        activeProcesses.delete(instanceId);
+        if (win && !win.isDestroyed()) {
+          win.webContents.send("instance:exit", { instanceId, code });
+        }
+      });
       const idx = all.findIndex((i) => i.id === instanceId);
       if (idx !== -1) {
         all[idx].lastPlayed = Date.now();
@@ -417,35 +579,29 @@ function getGameDir() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
 }
 function setupModHandlers(ipcMain, store2) {
-  ipcMain.handle("mods:search", async (_, { query, source, mcVersion, projectType, category }) => {
+  ipcMain.handle("mods:search", async (_, { query, source, mcVersion, projectType, category, offset = 0 }) => {
     try {
       const loader = source.toLowerCase();
       const facets = [
         [`versions:${mcVersion}`],
         [`project_type:${projectType}`]
-        // mod, resourcepack, shader
       ];
-      if (projectType === "mod") {
-        facets.push([`categories:${loader}`]);
-      }
-      if (category && category !== "all") {
-        facets.push([`categories:${category}`]);
-      }
+      if (projectType === "mod") facets.push([`categories:${loader}`]);
+      if (category && category !== "all") facets.push([`categories:${category}`]);
       const res = await axios.get(`${API_BASE}/search`, {
         params: {
           query: query || "",
-          // Empty query allows fetching popular content
           facets: JSON.stringify(facets),
           index: "downloads",
-          // Sort by popularity by default
-          limit: 30
+          limit: 30,
+          offset
+          // PAGINATION ADDED
         },
         timeout: 1e4
       });
-      return { success: true, results: res.data.hits };
+      return { success: true, results: res.data.hits, total: res.data.total_hits };
     } catch (error) {
-      console.error("Mod search error:", error.message);
-      return { success: false, error: "Failed to search Modrinth. Check network." };
+      return { success: false, error: "Failed to search Modrinth." };
     }
   });
   ipcMain.handle("mods:install", async (_, { mod, instanceId }) => {
@@ -455,10 +611,7 @@ function setupModHandlers(ipcMain, store2) {
       if (!inst) throw new Error("Instance not found");
       const loaders = mod.project_type === "mod" ? JSON.stringify([inst.loader]) : void 0;
       const verRes = await axios.get(`${API_BASE}/project/${mod.project_id}/version`, {
-        params: {
-          loaders,
-          game_versions: JSON.stringify([inst.mcVersion])
-        },
+        params: { loaders, game_versions: JSON.stringify([inst.mcVersion]) },
         timeout: 1e4
       });
       if (verRes.data.length === 0) throw new Error(`No compatible version found for ${inst.mcVersion}.`);

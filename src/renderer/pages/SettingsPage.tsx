@@ -10,11 +10,9 @@ interface Settings {
   javaPath: string
   gameDir: string
   sendCrashReports: boolean
-  // Client visibility
   hideOnGame: boolean
   minimizeOnGame: boolean
   showTaskbar: boolean
-  // HUD
   hudEnabled: boolean
   hudOpacity: number
 }
@@ -127,14 +125,10 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {/* Launcher */}
+        {/* Launcher (Discord Toggle Removed) */}
         <div className={s.section}>
           <div className={s.sectionTitle}>Launcher</div>
           <div className={s.card}>
-            <div className={s.row}>
-              <div className={s.rowInfo}><div className={s.rowLabel}>Discord Rich Presence</div><div className={s.rowSub}>Show activity on Discord (configure in Discord tab)</div></div>
-              <Toggle k="discordRpc"/>
-            </div>
             <div className={s.row}>
               <div className={s.rowInfo}><div className={s.rowLabel}>Auto Update</div><div className={s.rowSub}>Download Kazuki Client updates automatically</div></div>
               <Toggle k="autoUpdate"/>
