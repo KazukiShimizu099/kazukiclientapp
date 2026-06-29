@@ -722,7 +722,7 @@ function setupSettingsHandlers(ipcMain, store2) {
     return { totalRam, cpu, platform, arch, autoRam };
   });
 }
-const CLIENT_ID = "1495443956232618064";
+const CLIENT_ID = "1521010841774981160";
 class KazukiRPCManager {
   constructor() {
     this.client = null;
@@ -786,6 +786,18 @@ class KazukiRPCManager {
     }).catch(() => {
     });
   }
+  destroy() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+    if (this.client) {
+      this.client.destroy().catch(() => {
+      });
+      this.client = null;
+    }
+    this.isReady = false;
+  }
 }
 const rpcManager = new KazukiRPCManager();
 function setupDiscordHandlers(ipcMain) {
@@ -793,6 +805,10 @@ function setupDiscordHandlers(ipcMain) {
     success: true,
     config: { enabled: true, details: "Kazuki Client", state: "Launcher" }
   }));
+  ipcMain.handle("discord:set-config", (_, cfg) => {
+    rpcManager.updateActivity(cfg.details || "Kazuki Client", cfg.state);
+    return { success: true };
+  });
   ipcMain.handle("discord:set-state", (_, { state, details }) => {
     rpcManager.updateActivity(details, state);
     return { success: true };

@@ -1,9 +1,9 @@
 import { Client } from 'discord-rpc';
 import { IpcMain } from 'electron';
 
-const CLIENT_ID = '1495443956232618064';
+const CLIENT_ID = '1521010841774981160';
 
-class KazukiRPCManager {
+export class KazukiRPCManager {
     private client: Client | null = null;
     public isReady: boolean = false;
     private reconnectTimeout: NodeJS.Timeout | null = null;
@@ -13,7 +13,6 @@ class KazukiRPCManager {
     }
 
     public async connect() {
-        // Purana client saaf karo agar hai toh
         if (this.client) {
             try { await this.client.destroy(); } catch (e) {}
             this.client = null;
@@ -69,20 +68,36 @@ class KazukiRPCManager {
             instance: false,
             buttons: [
                 { label: "Get Kazuki Client", url: "https://github.com/kazuki-client" },
-                { label: "Discord Server", url: "https://discord.gg/kazuki" }
+                { label: "Discord Server", url: "https://discord.gg/T3AEpEjA9m" }
             ]
         }).catch(() => { /* Silent fail to prevent crash */ });
     }
+
+    public destroy() {
+        if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = null;
+        }
+        if (this.client) {
+            this.client.destroy().catch(() => {});
+            this.client = null;
+        }
+        this.isReady = false;
+    }
 }
 
-const rpcManager = new KazukiRPCManager();
+export const rpcManager = new KazukiRPCManager();
 
 export function setupDiscordHandlers(ipcMain: IpcMain) {
-    // UI ke errors fix karne ke liye saare handlers
     ipcMain.handle('discord:get-config', () => ({
         success: true,
         config: { enabled: true, details: 'Kazuki Client', state: 'Launcher' }
     }));
+
+    ipcMain.handle('discord:set-config', (_, cfg) => {
+        rpcManager.updateActivity(cfg.details || 'Kazuki Client', cfg.state);
+        return { success: true };
+    });
 
     ipcMain.handle('discord:set-state', (_, { state, details }) => {
         rpcManager.updateActivity(details, state);
