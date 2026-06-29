@@ -5,9 +5,11 @@ const axios = require("axios");
 const crypto = require("crypto");
 const fs = require("fs-extra");
 const AdmZip = require("adm-zip");
+const http = require("http");
+const https = require("https");
 const child_process = require("child_process");
-const uuid = require("uuid");
 const os = require("os");
+const uuid = require("uuid");
 const discordRpc = require("discord-rpc");
 const Store = require("electron-store");
 function _interopNamespaceDefault(e) {
@@ -178,6 +180,9 @@ function setupAuthHandlers(ipcMain, store2) {
 }
 const MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
 const RESOURCES_URL = "https://resources.download.minecraft.net";
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 100 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
+const client = axios.create({ httpAgent, httpsAgent });
 function getGameDir$2() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
 }
@@ -195,11 +200,10 @@ async function downloadFile(url, dest, win, label, maxRetries = 3) {
       }
       if (start > 0) {
         try {
-          const headRes = await axios.head(url, { timeout: 1e4 });
+          const headRes = await client.head(url, { timeout: 1e4 });
           const remoteSize = parseInt(headRes.headers["content-length"] || "0", 10);
           if (remoteSize > 0) {
             if (start === remoteSize) {
-              win?.webContents.send("download:progress", { name: label, percent: 100, detail: "Skipped (Already downloaded)" });
               return;
             }
             if (start > remoteSize) {
@@ -210,12 +214,12 @@ async function downloadFile(url, dest, win, label, maxRetries = 3) {
         } catch (e) {
         }
       }
-      const response = await axios({
+      const response = await client({
         method: "GET",
         url,
         responseType: "stream",
         headers: start > 0 ? { Range: `bytes=${start}-` } : {},
-        timeout: 2e4
+        timeout: 15e3
       });
       if (start > 0 && response.status !== 206) {
         start = 0;
@@ -228,16 +232,18 @@ async function downloadFile(url, dest, win, label, maxRetries = 3) {
         let stallTimer = setTimeout(() => {
           writer.destroy();
           reject(new Error("Stream stalled"));
-        }, 15e3);
+        }, 1e4);
         response.data.on("data", (chunk) => {
           clearTimeout(stallTimer);
           stallTimer = setTimeout(() => {
             writer.destroy();
             reject(new Error("Stream stalled"));
-          }, 15e3);
+          }, 1e4);
           downloaded += chunk.length;
-          const percent = totalLength > 0 ? Math.round(downloaded / totalLength * 100) : 0;
-          win?.webContents.send("download:progress", { name: label, percent, detail: `${formatBytes(downloaded)} / ${formatBytes(totalLength)}` });
+          if (label === "Minecraft Core") {
+            const percent = totalLength > 0 ? Math.round(downloaded / totalLength * 100) : 0;
+            win?.webContents.send("download:progress", { name: label, percent, detail: `${formatBytes(downloaded)} / ${formatBytes(totalLength)}` });
+          }
         });
         response.data.pipe(writer);
         writer.on("finish", () => {
@@ -252,11 +258,9 @@ async function downloadFile(url, dest, win, label, maxRetries = 3) {
       });
       return;
     } catch (err) {
-      if (err.response && err.response.status === 416) {
-        await fs__namespace.remove(dest);
-      }
-      if (attempt === maxRetries) throw new Error(`Failed after 3 attempts: ${err.message}`);
-      await new Promise((r) => setTimeout(r, 2e3));
+      if (err.response && err.response.status === 416) await fs__namespace.remove(dest);
+      if (attempt === maxRetries) throw new Error(`Failed: ${err.message}`);
+      await new Promise((r) => setTimeout(r, 1e3));
     }
   }
 }
@@ -273,21 +277,25 @@ async function downloadLibraries(libraries, gameDir, win) {
     }
     return true;
   });
-  for (let i = 0; i < validLibs.length; i++) {
-    const lib = validLibs[i];
-    const artifact = lib.downloads.artifact;
-    const dest = path__namespace.join(gameDir, "libraries", artifact.path);
-    win?.webContents.send("download:progress", {
-      name: `Library (${i + 1}/${validLibs.length})`,
-      percent: Math.round((i + 1) / validLibs.length * 100),
-      detail: lib.name.split(":")[1]
-    });
-    try {
-      await downloadFile(artifact.url, dest, win, "Library");
-    } catch (e) {
-      console.error(e);
+  let done = 0;
+  const total = validLibs.length;
+  const CONCURRENCY = 15;
+  const queue = [...validLibs];
+  async function worker() {
+    while (queue.length > 0) {
+      const lib = queue.pop();
+      const dest = path__namespace.join(gameDir, "libraries", lib.downloads.artifact.path);
+      try {
+        await downloadFile(lib.downloads.artifact.url, dest, win, "Library");
+      } catch (e) {
+      }
+      done++;
+      if (done % 5 === 0 || done === total) {
+        win?.webContents.send("download:progress", { name: "Libraries", percent: Math.round(done / total * 100), detail: `${done} / ${total} files` });
+      }
     }
   }
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 }
 async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
   const assetIndexPath = path__namespace.join(gameDir, "assets", "indexes", `${assetIndexId}.json`);
@@ -296,7 +304,7 @@ async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
   const objects = Object.values(indexData.objects);
   let done = 0;
   const total = objects.length;
-  const CONCURRENCY = 8;
+  const CONCURRENCY = 40;
   const queue = [...objects];
   async function worker() {
     while (queue.length > 0) {
@@ -308,7 +316,7 @@ async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
       } catch (e) {
       }
       done++;
-      if (done % 50 === 0 || done === total) {
+      if (done % 100 === 0 || done === total) {
         win?.webContents.send("download:progress", { name: "Game Assets", percent: Math.round(done / total * 100), detail: `${done} / ${total} files` });
       }
     }
@@ -318,7 +326,7 @@ async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
 function setupVersionHandlers(ipcMain, store2) {
   ipcMain.handle("versions:get-list", async () => {
     try {
-      const res = await axios.get(MANIFEST_URL, { timeout: 1e4 });
+      const res = await client.get(MANIFEST_URL, { timeout: 1e4 });
       const supported = res.data.versions.filter((v) => v.type === "release");
       return { success: true, versions: supported };
     } catch (err) {
@@ -330,20 +338,22 @@ function setupVersionHandlers(ipcMain, store2) {
     const gameDir = getGameDir$2();
     try {
       win?.webContents.send("download:progress", { name: "Connecting...", percent: 5, detail: "Mojang API" });
-      const manifestRes = await axios.get(MANIFEST_URL, { timeout: 1e4 });
+      const manifestRes = await client.get(MANIFEST_URL, { timeout: 1e4 });
       const versionMeta = manifestRes.data.versions.find((v) => v.id === versionId);
       if (!versionMeta) throw new Error(`Version ${versionId} not found.`);
       win?.webContents.send("download:progress", { name: "Parsing version...", percent: 10, detail: "" });
-      const versionRes = await axios.get(versionMeta.url, { timeout: 1e4 });
+      const versionRes = await client.get(versionMeta.url, { timeout: 1e4 });
       const versionData = versionRes.data;
       const actualId = versionData.id;
       const versionDir = path__namespace.join(gameDir, "versions", actualId);
       await fs__namespace.ensureDir(versionDir);
       await fs__namespace.writeJson(path__namespace.join(versionDir, `${actualId}.json`), versionData);
+      win?.webContents.send("download:progress", { name: "Minecraft Core", percent: 0, detail: "Starting download..." });
       const clientJarPath = path__namespace.join(versionDir, `${actualId}.jar`);
       await downloadFile(versionData.downloads.client.url, clientJarPath, win, "Minecraft Core");
       await downloadLibraries(versionData.libraries, gameDir, win);
       await downloadAssets(versionData.assetIndex, versionData.assetIndex.id, gameDir, win);
+      win?.webContents.send("download:progress", { name: "Extracting Natives", percent: 99, detail: "Almost done" });
       const nativesDir = path__namespace.join(versionDir, "natives");
       await fs__namespace.ensureDir(nativesDir);
       for (const lib of versionData.libraries) {
@@ -386,15 +396,19 @@ function getGameDir$1() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
 }
 function getRequiredJavaVersion(mcVersion) {
-  if (!mcVersion) return 17;
+  if (!mcVersion) return 21;
+  if (/^26\./.test(mcVersion)) return 25;
+  if (/^\d{2}/.test(mcVersion)) return 21;
   const parts = mcVersion.split(".");
-  const minor = parseInt(parts[1] || "0");
-  const patch = parseInt(parts[2] || "0");
-  if (minor >= 21 || minor === 20 && patch >= 5) return 21;
-  if (minor >= 17) return 17;
+  if (parts[0] === "1") {
+    const minor = parseInt(parts[1] || "0");
+    const patch = parseInt(parts[2] || "0");
+    if (minor >= 21 || minor === 20 && patch >= 5) return 21;
+    if (minor >= 17) return 17;
+  }
   return 8;
 }
-async function ensureJavaRuntime(mcVersion, gameDir) {
+async function ensureJavaRuntime(mcVersion, gameDir, win) {
   const javaVer = getRequiredJavaVersion(mcVersion);
   const runtimeDir = path__namespace.join(gameDir, "runtime", `java-${javaVer}`);
   const findJavaw = async (dir) => {
@@ -412,35 +426,46 @@ async function ensureJavaRuntime(mcVersion, gameDir) {
     return null;
   };
   const existing = await findJavaw(runtimeDir);
-  if (existing) return existing;
+  if (existing) {
+    win?.webContents.send("instance:log", `[System] Using isolated Java ${javaVer} (x64) environment.`);
+    return existing;
+  }
+  win?.webContents.send("instance:log", `[System] Java ${javaVer} not found. Preparing automatic download...`);
   await fs__namespace.ensureDir(runtimeDir);
   const apiUrl = `https://api.adoptium.net/v3/binary/latest/${javaVer}/ga/windows/x64/jre/hotspot/normal/eclipse`;
   const zipPath = path__namespace.join(runtimeDir, "temp.zip");
   try {
-    const response = await axios({
-      method: "GET",
-      url: apiUrl,
-      responseType: "arraybuffer"
+    win?.webContents.send("instance:log", `[System] Downloading Java Runtime Environment...`);
+    const response = await axios({ method: "GET", url: apiUrl, responseType: "stream" });
+    await new Promise((resolve, reject) => {
+      const writer = fs__namespace.createWriteStream(zipPath);
+      response.data.pipe(writer);
+      writer.on("finish", resolve);
+      writer.on("error", reject);
     });
-    await fs__namespace.writeFile(zipPath, response.data);
+    win?.webContents.send("instance:log", `[System] Extracting Java architecture...`);
     const zip = new AdmZip(zipPath);
     zip.extractAllTo(runtimeDir, true);
     await fs__namespace.remove(zipPath);
     const extracted = await findJavaw(runtimeDir);
-    if (!extracted) throw new Error(`Java ${javaVer} binary missing after extraction.`);
+    if (!extracted) throw new Error(`Java binary missing.`);
     return extracted;
   } catch (error) {
-    throw new Error(`Failed to download Java ${javaVer}. Check your internet connection. Detail: ${error.message}`);
+    throw new Error(`Failed to provision Java ${javaVer}. Detail: ${error.message}`);
   }
 }
-function buildJvmArgs(minRam, maxRam, nativesDir, custom, mcVersion) {
-  const safeMax = Math.min(Math.max(maxRam, 1024), 12288);
-  const safeMin = Math.min(Math.max(minRam, 256), safeMax);
-  const isNewVersion = mcVersion && /^\d{2}\./.test(mcVersion);
+function buildJvmArgs(minRam, reqMaxRam, nativesDir, custom, mcVersion) {
+  const sysTotalRam = Math.floor(os__namespace.totalmem() / (1024 * 1024));
+  const osReserved = 2048;
+  const safeMaxRam = Math.max(1024, sysTotalRam - osReserved);
+  const finalMaxRam = Math.min(reqMaxRam, safeMaxRam);
+  const safeMin = Math.min(Math.max(minRam, 256), finalMaxRam);
+  const javaVer = getRequiredJavaVersion(mcVersion);
+  const useZGC = javaVer >= 21;
   const base = [
     `-Xms${safeMin}M`,
-    `-Xmx${safeMax}M`,
-    isNewVersion ? "-XX:+UseZGC" : "-XX:+UseG1GC",
+    `-Xmx${finalMaxRam}M`,
+    useZGC ? "-XX:+UseZGC" : "-XX:+UseG1GC",
     `-XX:+UnlockExperimentalVMOptions`,
     `-XX:MaxGCPauseMillis=200`,
     `-XX:+ParallelRefProcEnabled`,
@@ -489,6 +514,12 @@ function resolveArgs(args, rep) {
     return r;
   });
 }
+function parseMaven(name, baseUrl = "https://maven.fabricmc.net/") {
+  const p = name.split(":");
+  const g = p[0].replace(/\./g, "/");
+  const file = `${p[1]}-${p[2]}.jar`;
+  return { url: `${baseUrl}${g}/${p[1]}/${p[2]}/${file}`, path: `${g}/${p[1]}/${p[2]}/${file}` };
+}
 function setupInstanceHandlers(ipcMain, store2, _win) {
   ipcMain.handle("instance:create", async (_, data) => {
     try {
@@ -502,15 +533,8 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
         fs__namespace.ensureDir(path__namespace.join(dir, "resourcepacks")),
         fs__namespace.ensureDir(path__namespace.join(dir, "saves")),
         fs__namespace.ensureDir(path__namespace.join(dir, "config")),
-        fs__namespace.ensureDir(path__namespace.join(dir, "logs")),
-        fs__namespace.ensureDir(path__namespace.join(dir, "crash-reports")),
-        fs__namespace.ensureDir(path__namespace.join(dir, "screenshots")),
-        fs__namespace.ensureDir(path__namespace.join(dir, "shaderpacks"))
+        fs__namespace.ensureDir(path__namespace.join(dir, "logs"))
       ]);
-      const optFile = path__namespace.join(dir, "options.txt");
-      if (!await fs__namespace.pathExists(optFile)) {
-        await fs__namespace.writeFile(optFile, "version:3\nautoJump:false\nrenderDistance:8\nmaxFps:260\nfboEnable:true\nlang:en_us\n");
-      }
       return { success: true, instance: inst };
     } catch (e) {
       return { success: false, error: e.message };
@@ -539,29 +563,62 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
   });
   ipcMain.handle("instance:launch", async (event, instanceId) => {
     try {
+      const win = electron.BrowserWindow.fromWebContents(event.sender);
       const all = store2.get("instances", []);
       const inst = all.find((i) => i.id === instanceId);
       if (!inst) throw new Error("Instance not found");
       const account = store2.get("account");
-      if (!account) throw new Error("Not logged in. Click your avatar to sign in.");
+      if (!account) throw new Error("Not logged in.");
       const settings = store2.get("settings", {});
       const gameDir = getGameDir$1();
       const meta = store2.get(`installed.${inst.mcVersion}`);
       const actualId = meta?.actualId || inst.mcVersion;
       const versionDir = path__namespace.join(gameDir, "versions", actualId);
       const versionJson = path__namespace.join(versionDir, `${actualId}.json`);
-      if (!await fs__namespace.pathExists(versionJson)) {
-        throw new Error(`Minecraft ${inst.mcVersion} not installed. Delete this instance and create a new one.`);
-      }
+      if (!await fs__namespace.pathExists(versionJson)) throw new Error(`Core files missing. Recreate instance.`);
       const vd = await fs__namespace.readJson(versionJson);
       const nativesDir = path__namespace.join(versionDir, "natives");
       const instDir = path__namespace.join(gameDir, "instances", instanceId);
       await fs__namespace.ensureDir(instDir);
       await fs__namespace.ensureDir(nativesDir);
-      await fs__namespace.ensureDir(path__namespace.join(instDir, "logs"));
-      const classpath = buildClasspath(vd.libraries, gameDir, actualId);
-      if (!classpath.trim()) throw new Error("Libraries missing. Reinstall instance with active internet connection.");
-      const javaPath = await ensureJavaRuntime(actualId, gameDir);
+      let mainClass = vd.mainClass;
+      let gameArgsRaw = [];
+      if (vd.arguments?.game) gameArgsRaw.push(...vd.arguments.game.filter((a) => typeof a === "string"));
+      else if (vd.minecraftArguments) gameArgsRaw.push(...vd.minecraftArguments.split(" "));
+      const allLibs = [...vd.libraries];
+      if (inst.loader === "fabric") {
+        win?.webContents.send("instance:log", "[System] Checking Fabric Loader requirements...");
+        const metaRes = await axios.get(`https://meta.fabricmc.net/v2/versions/loader/${inst.mcVersion}`);
+        if (!metaRes.data || metaRes.data.length === 0) throw new Error(`Fabric is not available for ${inst.mcVersion}`);
+        const loaderVer = metaRes.data[0].loader.version;
+        win?.webContents.send("instance:log", `[System] Injecting Fabric ${loaderVer}...`);
+        const profileRes = await axios.get(`https://meta.fabricmc.net/v2/versions/loader/${inst.mcVersion}/${loaderVer}/profile/json`);
+        const fp = profileRes.data;
+        mainClass = fp.mainClass;
+        if (fp.arguments?.game) gameArgsRaw.push(...fp.arguments.game);
+        for (const lib of fp.libraries) {
+          const maven = parseMaven(lib.name, lib.url);
+          const dest = path__namespace.join(gameDir, "libraries", maven.path);
+          allLibs.push({ downloads: { artifact: { path: maven.path } } });
+          if (!await fs__namespace.pathExists(dest)) {
+            await fs__namespace.ensureDir(path__namespace.dirname(dest));
+            try {
+              const res = await axios({ method: "GET", url: maven.url, responseType: "stream" });
+              const writer = fs__namespace.createWriteStream(dest);
+              res.data.pipe(writer);
+              await new Promise((res2, rej) => {
+                writer.on("finish", res2);
+                writer.on("error", rej);
+              });
+            } catch (e) {
+              throw new Error(`Failed to download Fabric dependency: ${lib.name}`);
+            }
+          }
+        }
+      }
+      const classpath = buildClasspath(allLibs, gameDir, actualId);
+      if (!classpath.trim()) throw new Error("Libraries missing.");
+      const javaPath = await ensureJavaRuntime(actualId, gameDir, win);
       const jvmArgs = buildJvmArgs(inst.minRam || 512, inst.maxRam || 2048, nativesDir, inst.customJvmArgs, inst.mcVersion);
       const uuid2 = (account.uuid || "").replace(/-/g, "") || "0".repeat(32);
       const rep = {
@@ -580,22 +637,28 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
         resolution_height: "720",
         classpath
       };
-      const rawArgs = [];
-      if (vd.arguments?.game) {
-        for (const a of vd.arguments.game) {
-          if (typeof a === "string") rawArgs.push(a);
-        }
-      } else if (vd.minecraftArguments) {
-        rawArgs.push(...vd.minecraftArguments.split(" "));
-      }
-      const gameArgs = resolveArgs(rawArgs, rep);
-      const fullArgs = [...jvmArgs, "-cp", classpath, vd.mainClass, ...gameArgs];
-      const win = electron.BrowserWindow.fromWebContents(event.sender);
-      const child = child_process.spawn(javaPath, fullArgs, { cwd: instDir, stdio: "ignore" });
+      const gameArgs = resolveArgs(gameArgsRaw, rep);
+      const fullArgs = [...jvmArgs, "-cp", classpath, mainClass, ...gameArgs];
+      const cleanEnv = Object.assign({}, process.env);
+      delete cleanEnv._JAVA_OPTIONS;
+      delete cleanEnv.JAVA_TOOL_OPTIONS;
+      delete cleanEnv.JAVA_HOME;
+      delete cleanEnv.JRE_HOME;
+      const safeArgs = fullArgs.map((arg) => arg.replace(/NaN/g, "2048"));
+      const child = child_process.spawn(javaPath, safeArgs, { cwd: instDir, stdio: ["ignore", "pipe", "pipe"], env: cleanEnv });
       activeProcesses.set(instanceId, child);
+      child.stdout?.on("data", (data) => {
+        const msg = data.toString().trim();
+        if (msg) win?.webContents.send("instance:log", `[Game] ${msg}`);
+      });
+      child.stderr?.on("data", (data) => {
+        const msg = data.toString().trim();
+        if (msg) win?.webContents.send("instance:log", `[JVM ERROR] ${msg}`);
+      });
       child.on("exit", (code) => {
         activeProcesses.delete(instanceId);
         if (win && !win.isDestroyed()) {
+          win.webContents.send("instance:log", `[System] Process exited with code ${code}`);
           win.webContents.send("instance:exit", { instanceId, code });
         }
       });
@@ -766,7 +829,7 @@ class KazukiRPCManager {
     this.client.on("ready", () => {
       this.isReady = true;
       console.log("SUCCESS: Discord RPC connected automatically.");
-      this.updateActivity("Kazuki Client v1.0", "In Launcher");
+      this.updateActivity("Kazuki Client", "In Launcher");
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
         this.reconnectTimeout = null;
@@ -803,7 +866,7 @@ class KazukiRPCManager {
       smallImageText: "Minecraft",
       instance: false,
       buttons: [
-        { label: "Get Kazuki Client", url: "https://github.com/kazuki-client" },
+        { label: "Get Kazuki Client", url: "https://github.com/" },
         { label: "Discord Server", url: "https://discord.gg/T3AEpEjA9m" }
       ]
     }).catch(() => {

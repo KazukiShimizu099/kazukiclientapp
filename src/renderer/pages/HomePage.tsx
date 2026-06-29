@@ -20,23 +20,29 @@ export default function HomePage({ account }: Props) {
   
   const timerRef = useRef<ReturnType<typeof setInterval>|null>(null)
 
-  useEffect(() => {
+useEffect(() => {
     loadInstances()
     
     const handleExit = (data: any) => {
       setLaunchState('idle')
       setPlayTime(0)
       if (timerRef.current) clearInterval(timerRef.current)
-      
       const timeStr = new Date().toLocaleTimeString()
       setConsole(prev => [...prev.slice(-99), `[${timeStr}] Game closed naturally (Exit Code: ${data.code || 0})`])
     }
 
+    // NAYA LISTENER: Background OS logs ko console me print karne ke liye
+    const handleSysLog = (msg: string) => {
+      setConsole(prev => [...prev.slice(-99), `[${new Date().toLocaleTimeString()}] ${msg}`])
+    }
+
     window.kazuki?.on('instance:exit', handleExit)
+    window.kazuki?.on('instance:log', handleSysLog) // Add this line
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current)
       window.kazuki?.off('instance:exit')
+      window.kazuki?.off('instance:log') // Add this line
     }
   }, [])
 
