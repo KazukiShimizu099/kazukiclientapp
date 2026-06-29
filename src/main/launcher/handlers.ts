@@ -1,20 +1,78 @@
 import { IpcMain, BrowserWindow } from 'electron'
-import { spawn, execSync } from 'child_process'
+import { spawn } from 'child_process'
 import * as path from 'path'
 import * as fs from 'fs-extra'
 import { app } from 'electron'
 import { v4 as uuidv4 } from 'uuid'
+import axios from 'axios'
+import AdmZip from 'adm-zip'
 import type { Instance, LauncherSettings } from '../../shared/types'
 
 function getGameDir(): string {
   return path.join(app.getPath('appData'), '.kazuki')
 }
 
+function getRequiredJavaVersion(mcVersion?: string): number {
+  if (!mcVersion) return 17;
+  const parts = mcVersion.split('.');
+  const minor = parseInt(parts[1] || '0');
+  const patch = parseInt(parts[2] || '0');
+
+  if (minor >= 21 || (minor === 20 && patch >= 5)) return 21;
+  if (minor >= 17) return 17;
+  return 8;
+}
+
+async function ensureJavaRuntime(mcVersion: string, gameDir: string): Promise<string> {
+  const javaVer = getRequiredJavaVersion(mcVersion);
+  const runtimeDir = path.join(gameDir, 'runtime', `java-${javaVer}`);
+  
+  const findJavaw = async (dir: string): Promise<string | null> => {
+    if (!await fs.pathExists(dir)) return null;
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        const res = await findJavaw(full);
+        if (res) return res;
+      } else if (e.name.toLowerCase() === 'javaw.exe') {
+        return full;
+      }
+    }
+    return null;
+  };
+
+  const existing = await findJavaw(runtimeDir);
+  if (existing) return existing;
+
+  await fs.ensureDir(runtimeDir);
+  const apiUrl = `https://api.adoptium.net/v3/binary/latest/${javaVer}/ga/windows/x64/jre/hotspot/normal/eclipse`;
+  const zipPath = path.join(runtimeDir, 'temp.zip');
+  
+  try {
+    const response = await axios({
+      method: 'GET',
+      url: apiUrl,
+      responseType: 'arraybuffer'
+    });
+    
+    await fs.writeFile(zipPath, response.data);
+    
+    const zip = new AdmZip(zipPath);
+    zip.extractAllTo(runtimeDir, true);
+    await fs.remove(zipPath);
+
+    const extracted = await findJavaw(runtimeDir);
+    if (!extracted) throw new Error(`Java ${javaVer} binary missing after extraction.`);
+    return extracted;
+  } catch (error: any) {
+    throw new Error(`Failed to download Java ${javaVer}. Check your internet connection. Detail: ${error.message}`);
+  }
+}
+
 function buildJvmArgs(minRam:number, maxRam:number, nativesDir:string, custom?:string, mcVersion?:string): string[] {
   const safeMax = Math.min(Math.max(maxRam,1024),12288)
   const safeMin = Math.min(Math.max(minRam,256),safeMax)
-
-  // 26.x needs ZGC (Java 25+), older versions use G1GC
   const isNewVersion = mcVersion && /^\d{2}\./.test(mcVersion)
 
   const base = [
@@ -59,57 +117,6 @@ function buildClasspath(libraries:any[], gameDir:string, versionId:string): stri
   return paths.join(path.delimiter)
 }
 
-async function findJava(custom?:string, mcVersion?:string): Promise<string> {
-  if (custom?.trim() && await fs.pathExists(custom.trim())) return custom.trim()
-
-  try {
-    const out = execSync('where javaw', {encoding:'utf8',timeout:3000}).trim()
-    const first = out.split('\n')[0].trim()
-    if (first && await fs.pathExists(first)) return first
-  } catch {}
-
-  if (process.env.JAVA_HOME) {
-    const j = path.join(process.env.JAVA_HOME,'bin','javaw.exe')
-    if (await fs.pathExists(j)) return j
-  }
-
-  const pf = process.env['ProgramFiles'] || 'C:\\Program Files'
-  const pf86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)'
-  const vendors = ['Java','Eclipse Adoptium','Microsoft','Temurin','Zulu','BellSoft','Amazon Corretto','GraalVM','OpenJDK','Semeru']
-  
-  for (const base of [pf,pf86]) {
-    for (const v of vendors) {
-      const dir = path.join(base,v)
-      if (!await fs.pathExists(dir)) continue
-      try {
-        const entries = (await fs.readdir(dir)).sort().reverse()
-        for (const e of entries) {
-          const j1 = path.join(dir,e,'bin','javaw.exe')
-          if (await fs.pathExists(j1)) return j1
-          const j2 = path.join(dir,e,'jre','bin','javaw.exe')
-          if (await fs.pathExists(j2)) return j2
-        }
-      } catch {}
-    }
-  }
-
-  try {
-    const reg = execSync('reg query "HKLM\\SOFTWARE\\JavaSoft\\Java Development Kit" /v CurrentVersion',{encoding:'utf8',timeout:3000})
-    const vm = reg.match(/CurrentVersion\s+REG_SZ\s+(.+)/)
-    if (vm) {
-      const home = execSync(`reg query "HKLM\\SOFTWARE\\JavaSoft\\Java Development Kit\\${vm[1].trim()}" /v JavaHome`,{encoding:'utf8',timeout:3000})
-      const hm = home.match(/JavaHome\s+REG_SZ\s+(.+)/)
-      if (hm) {
-        const j = path.join(hm[1].trim(),'bin','javaw.exe')
-        if (await fs.pathExists(j)) return j
-      }
-    }
-  } catch {}
-
-  // SILENT FAIL KO HATA DIYA HAI. EXPLICIT ERROR THROW KAREGA.
-  throw new Error('Java not found on your system. Please install Java 17/21 from Adoptium or specify the exact java path in Settings.');
-}
-
 function resolveArgs(args:string[], rep:Record<string,string>): string[] {
   return args.map(a => {
     let r = a
@@ -121,7 +128,6 @@ function resolveArgs(args:string[], rep:Record<string,string>): string[] {
 }
 
 export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWindow|null) {
-
   ipcMain.handle('instance:create', async (_,data:any)=>{
     try {
       const inst:Instance = {...data, id:uuidv4(), createdAt:Date.now()}
@@ -165,7 +171,7 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
       if(!inst) throw new Error('Instance not found')
 
       const account=store.get('account')
-      if(!account) throw new Error('Not logged in — click your avatar to sign in')
+      if(!account) throw new Error('Not logged in. Click your avatar to sign in.')
 
       const settings:LauncherSettings=store.get('settings',{})
       const gameDir=getGameDir()
@@ -176,7 +182,7 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
       const versionDir=path.join(gameDir,'versions',actualId)
       const versionJson=path.join(versionDir,`${actualId}.json`)
       if(!await fs.pathExists(versionJson)){
-        throw new Error(`Minecraft ${inst.mcVersion} not installed.\nDelete this instance and create a new one with "Install & Create".`)
+        throw new Error(`Minecraft ${inst.mcVersion} not installed. Delete this instance and create a new one.`)
       }
 
       const vd=await fs.readJson(versionJson)
@@ -188,10 +194,9 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
       await fs.ensureDir(path.join(instDir,'logs'))
 
       const classpath=buildClasspath(vd.libraries,gameDir,actualId)
-      if(!classpath.trim()) throw new Error('Libraries missing — delete instance and reinstall with internet connection.')
+      if(!classpath.trim()) throw new Error('Libraries missing. Reinstall instance with active internet connection.')
 
-      // ERROR PROPAGATION: Agar findJava fail hua, catch block direct error ko UI par bhej dega
-      const javaPath=await findJava((inst as any).javaPath||(settings as any).javaPath, inst.mcVersion)
+      const javaPath = await ensureJavaRuntime(actualId, gameDir)
       const jvmArgs=buildJvmArgs(inst.minRam||512,inst.maxRam||2048,nativesDir,(inst as any).customJvmArgs,inst.mcVersion)
 
       const uuid=(account.uuid||'').replace(/-/g,'')||'0'.repeat(32)
@@ -224,7 +229,6 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
 
       const win=BrowserWindow.fromWebContents(event.sender)
       
-      // Detached execute hoga, agar crash hua toh logs `.kazuki/instances/id/logs` me jayenge
       const child=spawn(javaPath,fullArgs,{cwd:instDir,detached:true,stdio:'ignore'})
       child.unref()
 

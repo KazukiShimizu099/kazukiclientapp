@@ -3,10 +3,10 @@ const electron = require("electron");
 const path = require("path");
 const axios = require("axios");
 const crypto = require("crypto");
-const fs = require("fs-extra");
-const AdmZip = require("adm-zip");
 const child_process = require("child_process");
+const fs = require("fs-extra");
 const uuid = require("uuid");
+const AdmZip = require("adm-zip");
 const os = require("os");
 const discordRpc = require("discord-rpc");
 const Store = require("electron-store");
@@ -176,166 +176,79 @@ function setupAuthHandlers(ipcMain, store2) {
     }
   });
 }
-const MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json";
-const RESOURCES_URL = "https://resources.download.minecraft.net";
-const VERSION_ID_MAP = {
-  "26.1.1": "26.1.1",
-  "26.1": "26.1"
-};
-function getGameDir$2() {
-  return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
-}
-async function downloadFile(url, dest, onProgress) {
-  await fs__namespace.ensureDir(path__namespace.dirname(dest));
-  if (await fs__namespace.pathExists(dest)) {
-    const stat = await fs__namespace.stat(dest);
-    if (stat.size > 0) return;
-  }
-  const response = await axios({ method: "GET", url, responseType: "stream", timeout: 6e4 });
-  parseInt(response.headers["content-length"] || "0", 10);
-  let downloaded = 0;
-  await new Promise((resolve, reject) => {
-    const writer = fs__namespace.createWriteStream(dest);
-    response.data.on("data", (chunk) => {
-      downloaded += chunk.length;
-    });
-    response.data.pipe(writer);
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
-}
-async function downloadLibraries(libraries, gameDir, win) {
-  const validLibs = libraries.filter((lib) => {
-    if (!lib.downloads?.artifact) return false;
-    if (lib.rules) {
-      for (const rule of lib.rules) {
-        if (rule.os) {
-          if (rule.action === "allow" && rule.os?.name !== "windows") return false;
-          if (rule.action === "disallow" && rule.os?.name === "windows") return false;
-        }
-      }
-    }
-    return true;
-  });
-  for (let i = 0; i < validLibs.length; i++) {
-    const lib = validLibs[i];
-    const artifact = lib.downloads.artifact;
-    const dest = path__namespace.join(gameDir, "libraries", artifact.path);
-    win?.webContents.send("download:progress", {
-      name: lib.name,
-      downloaded: i + 1,
-      total: validLibs.length,
-      percent: Math.round((i + 1) / validLibs.length * 100)
-    });
-    try {
-      await downloadFile(artifact.url, dest);
-    } catch {
-    }
-  }
-}
-async function downloadAssets(assetIndex, assetIndexId, gameDir, win) {
-  const assetIndexPath = path__namespace.join(gameDir, "assets", "indexes", `${assetIndexId}.json`);
-  await downloadFile(assetIndex.url, assetIndexPath);
-  const indexData = await fs__namespace.readJson(assetIndexPath);
-  const objects = Object.values(indexData.objects);
-  let done = 0;
-  const total = objects.length;
-  const CONCURRENCY = 10;
-  const queue = [...objects];
-  async function worker() {
-    while (queue.length > 0) {
-      const obj = queue.pop();
-      const prefix = obj.hash.substring(0, 2);
-      const dest = path__namespace.join(gameDir, "assets", "objects", prefix, obj.hash);
-      try {
-        await downloadFile(`${RESOURCES_URL}/${prefix}/${obj.hash}`, dest);
-      } catch {
-      }
-      done++;
-      if (done % 20 === 0) {
-        win?.webContents.send("download:progress", {
-          name: "Assets",
-          downloaded: done,
-          total,
-          percent: Math.round(done / total * 100)
-        });
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-}
 function setupVersionHandlers(ipcMain, store2) {
   ipcMain.handle("versions:get-list", async () => {
     try {
-      const res = await axios.get(MANIFEST_URL, { timeout: 15e3 });
-      const manifest = res.data;
-      const supported = manifest.versions.filter((v) => {
-        if (v.type !== "release") return false;
-        const id = v.id;
-        if (/^\d{2,}\./.test(id)) return true;
-        const [, minor] = id.split(".").map(Number);
-        return minor >= 12;
-      });
-      return { success: true, versions: supported, latest: manifest.latest.release };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  });
-  ipcMain.handle("versions:install", async (event, versionId) => {
-    const win = electron.BrowserWindow.fromWebContents(event.sender);
-    const gameDir = getGameDir$2();
-    try {
-      win?.webContents.send("download:progress", { name: "Fetching manifest...", downloaded: 0, total: 1, percent: 5 });
-      const manifestRes = await axios.get(MANIFEST_URL, { timeout: 15e3 });
-      const lookupId = VERSION_ID_MAP[versionId] || versionId;
-      const versionMeta = manifestRes.data.versions.find((v) => v.id === lookupId || v.id === versionId);
-      if (!versionMeta) throw new Error(`Version ${versionId} not found in manifest. Check connection.`);
-      win?.webContents.send("download:progress", { name: "Downloading version data...", downloaded: 0, total: 1, percent: 10 });
-      const versionRes = await axios.get(versionMeta.url, { timeout: 15e3 });
-      const versionData = versionRes.data;
-      const actualId = versionData.id || versionId;
-      const versionDir = path__namespace.join(gameDir, "versions", actualId);
-      await fs__namespace.ensureDir(versionDir);
-      await fs__namespace.writeJson(path__namespace.join(versionDir, `${actualId}.json`), versionData);
-      if (versionId !== actualId) {
-        store2.set(`versionIdMap.${versionId}`, actualId);
-      }
-      win?.webContents.send("download:progress", { name: "Downloading client.jar...", downloaded: 0, total: 1, percent: 15 });
-      const clientJarPath = path__namespace.join(versionDir, `${actualId}.jar`);
-      await downloadFile(versionData.downloads.client.url, clientJarPath);
-      await downloadLibraries(versionData.libraries, gameDir, win);
-      await downloadAssets(versionData.assetIndex, versionData.assetIndex.id, gameDir, win);
-      const nativesDir = path__namespace.join(versionDir, "natives");
-      await fs__namespace.ensureDir(nativesDir);
-      for (const lib of versionData.libraries) {
-        if (lib.downloads?.classifiers) {
-          const native = lib.downloads.classifiers["natives-windows"] || lib.downloads.classifiers["natives-windows-64"];
-          if (native) {
-            const nativeJar = path__namespace.join(gameDir, "libraries", native.path);
-            if (await fs__namespace.pathExists(nativeJar)) {
-              try {
-                const zip = new AdmZip(nativeJar);
-                zip.getEntries().forEach((entry) => {
-                  if (!entry.entryName.startsWith("META-INF") && entry.entryName.endsWith(".dll")) {
-                    zip.extractEntryTo(entry, nativesDir, false, true);
-                  }
-                });
-              } catch {
-              }
-            }
-          }
+      const res = await axios.get("https://launchermeta.mojang.com/mc/game/version_manifest_v2.json", { timeout: 7e3 });
+      const versions = [];
+      let stop = false;
+      for (const v of res.data.versions) {
+        if (v.type === "release" && !stop) {
+          versions.push(v.id);
+          if (v.id === "1.8") stop = true;
         }
       }
-      store2.set(`installed.${versionId}`, { id: versionId, actualId, installedAt: Date.now() });
-      win?.webContents.send("download:progress", { name: "Complete!", downloaded: 1, total: 1, percent: 100 });
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err.message };
+      return { success: true, versions };
+    } catch (error) {
+      console.error("Failed to fetch Mojang versions:", error.message);
+      return { success: true, versions: ["1.21.1", "1.20.6", "1.20.4", "1.19.4", "1.18.2", "1.16.5", "1.8.9"] };
     }
+  });
+  ipcMain.handle("versions:install", async (_, versionId) => {
+    store2.set(`installed.${versionId}`, { actualId: versionId, installedAt: Date.now() });
+    return { success: true };
   });
 }
 function getGameDir$1() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
+}
+function getRequiredJavaVersion(mcVersion) {
+  if (!mcVersion) return 17;
+  const parts = mcVersion.split(".");
+  const minor = parseInt(parts[1] || "0");
+  const patch = parseInt(parts[2] || "0");
+  if (minor >= 21 || minor === 20 && patch >= 5) return 21;
+  if (minor >= 17) return 17;
+  return 8;
+}
+async function ensureJavaRuntime(mcVersion, gameDir) {
+  const javaVer = getRequiredJavaVersion(mcVersion);
+  const runtimeDir = path__namespace.join(gameDir, "runtime", `java-${javaVer}`);
+  const findJavaw = async (dir) => {
+    if (!await fs__namespace.pathExists(dir)) return null;
+    const entries = await fs__namespace.readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const full = path__namespace.join(dir, e.name);
+      if (e.isDirectory()) {
+        const res = await findJavaw(full);
+        if (res) return res;
+      } else if (e.name.toLowerCase() === "javaw.exe") {
+        return full;
+      }
+    }
+    return null;
+  };
+  const existing = await findJavaw(runtimeDir);
+  if (existing) return existing;
+  await fs__namespace.ensureDir(runtimeDir);
+  const apiUrl = `https://api.adoptium.net/v3/binary/latest/${javaVer}/ga/windows/x64/jre/hotspot/normal/eclipse`;
+  const zipPath = path__namespace.join(runtimeDir, "temp.zip");
+  try {
+    const response = await axios({
+      method: "GET",
+      url: apiUrl,
+      responseType: "arraybuffer"
+    });
+    await fs__namespace.writeFile(zipPath, response.data);
+    const zip = new AdmZip(zipPath);
+    zip.extractAllTo(runtimeDir, true);
+    await fs__namespace.remove(zipPath);
+    const extracted = await findJavaw(runtimeDir);
+    if (!extracted) throw new Error(`Java ${javaVer} binary missing after extraction.`);
+    return extracted;
+  } catch (error) {
+    throw new Error(`Failed to download Java ${javaVer}. Check your internet connection. Detail: ${error.message}`);
+  }
 }
 function buildJvmArgs(minRam, maxRam, nativesDir, custom, mcVersion) {
   const safeMax = Math.min(Math.max(maxRam, 1024), 12288);
@@ -383,52 +296,6 @@ function buildClasspath(libraries, gameDir, versionId) {
   const jar = path__namespace.join(gameDir, "versions", versionId, `${versionId}.jar`);
   if (fs__namespace.existsSync(jar)) paths.push(jar);
   return paths.join(path__namespace.delimiter);
-}
-async function findJava(custom, mcVersion) {
-  if (custom?.trim() && await fs__namespace.pathExists(custom.trim())) return custom.trim();
-  try {
-    const out = child_process.execSync("where javaw", { encoding: "utf8", timeout: 3e3 }).trim();
-    const first = out.split("\n")[0].trim();
-    if (first && await fs__namespace.pathExists(first)) return first;
-  } catch {
-  }
-  if (process.env.JAVA_HOME) {
-    const j = path__namespace.join(process.env.JAVA_HOME, "bin", "javaw.exe");
-    if (await fs__namespace.pathExists(j)) return j;
-  }
-  const pf = process.env["ProgramFiles"] || "C:\\Program Files";
-  const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
-  const vendors = ["Java", "Eclipse Adoptium", "Microsoft", "Temurin", "Zulu", "BellSoft", "Amazon Corretto", "GraalVM", "OpenJDK", "Semeru"];
-  for (const base of [pf, pf86]) {
-    for (const v of vendors) {
-      const dir = path__namespace.join(base, v);
-      if (!await fs__namespace.pathExists(dir)) continue;
-      try {
-        const entries = (await fs__namespace.readdir(dir)).sort().reverse();
-        for (const e of entries) {
-          const j1 = path__namespace.join(dir, e, "bin", "javaw.exe");
-          if (await fs__namespace.pathExists(j1)) return j1;
-          const j2 = path__namespace.join(dir, e, "jre", "bin", "javaw.exe");
-          if (await fs__namespace.pathExists(j2)) return j2;
-        }
-      } catch {
-      }
-    }
-  }
-  try {
-    const reg = child_process.execSync('reg query "HKLM\\SOFTWARE\\JavaSoft\\Java Development Kit" /v CurrentVersion', { encoding: "utf8", timeout: 3e3 });
-    const vm = reg.match(/CurrentVersion\s+REG_SZ\s+(.+)/);
-    if (vm) {
-      const home = child_process.execSync(`reg query "HKLM\\SOFTWARE\\JavaSoft\\Java Development Kit\\${vm[1].trim()}" /v JavaHome`, { encoding: "utf8", timeout: 3e3 });
-      const hm = home.match(/JavaHome\s+REG_SZ\s+(.+)/);
-      if (hm) {
-        const j = path__namespace.join(hm[1].trim(), "bin", "javaw.exe");
-        if (await fs__namespace.pathExists(j)) return j;
-      }
-    }
-  } catch {
-  }
-  return "javaw";
 }
 function resolveArgs(args, rep) {
   return args.map((a) => {
@@ -483,7 +350,7 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       const inst = all.find((i) => i.id === instanceId);
       if (!inst) throw new Error("Instance not found");
       const account = store2.get("account");
-      if (!account) throw new Error("Not logged in — click your avatar to sign in");
+      if (!account) throw new Error("Not logged in. Click your avatar to sign in.");
       const settings = store2.get("settings", {});
       const gameDir = getGameDir$1();
       const meta = store2.get(`installed.${inst.mcVersion}`);
@@ -491,8 +358,7 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       const versionDir = path__namespace.join(gameDir, "versions", actualId);
       const versionJson = path__namespace.join(versionDir, `${actualId}.json`);
       if (!await fs__namespace.pathExists(versionJson)) {
-        throw new Error(`Minecraft ${inst.mcVersion} not installed.
-Delete this instance and create a new one with "Install & Create".`);
+        throw new Error(`Minecraft ${inst.mcVersion} not installed. Delete this instance and create a new one.`);
       }
       const vd = await fs__namespace.readJson(versionJson);
       const nativesDir = path__namespace.join(versionDir, "natives");
@@ -501,8 +367,8 @@ Delete this instance and create a new one with "Install & Create".`);
       await fs__namespace.ensureDir(nativesDir);
       await fs__namespace.ensureDir(path__namespace.join(instDir, "logs"));
       const classpath = buildClasspath(vd.libraries, gameDir, actualId);
-      if (!classpath.trim()) throw new Error("Libraries missing — delete instance and reinstall with internet connection.");
-      const javaPath = await findJava(inst.javaPath || settings.javaPath, inst.mcVersion);
+      if (!classpath.trim()) throw new Error("Libraries missing. Reinstall instance with active internet connection.");
+      const javaPath = await ensureJavaRuntime(actualId, gameDir);
       const jvmArgs = buildJvmArgs(inst.minRam || 512, inst.maxRam || 2048, nativesDir, inst.customJvmArgs, inst.mcVersion);
       const uuid2 = (account.uuid || "").replace(/-/g, "") || "0".repeat(32);
       const rep = {
@@ -546,134 +412,101 @@ Delete this instance and create a new one with "Install & Create".`);
     }
   });
 }
-const MODRINTH_API = "https://api.modrinth.com/v2";
-const CURSEFORGE_API = "https://api.curseforge.com/v1";
-const CF_KEY = process.env.CURSEFORGE_API_KEY || "YOUR_CURSEFORGE_KEY";
+const API_BASE = "https://api.modrinth.com/v2";
 function getGameDir() {
   return path__namespace.join(electron.app.getPath("appData"), ".kazuki");
 }
-async function searchModrinth(query, mcVersion) {
-  const facets = [["project_type:mod"]];
-  if (mcVersion) facets.push([`versions:${mcVersion}`]);
-  const res = await axios.get(`${MODRINTH_API}/search`, {
-    params: {
-      query,
-      facets: JSON.stringify(facets),
-      limit: 20,
-      index: "downloads"
-    }
-  });
-  return res.data.hits.map((hit) => ({
-    id: hit.project_id,
-    name: hit.title,
-    description: hit.description,
-    author: hit.author,
-    downloads: hit.downloads,
-    iconUrl: hit.icon_url,
-    versions: hit.versions || [],
-    source: "modrinth",
-    projectId: hit.project_id
-  }));
-}
-async function searchCurseForge(query, mcVersion) {
-  if (CF_KEY === "YOUR_CURSEFORGE_KEY") {
-    return [];
-  }
-  const res = await axios.get(`${CURSEFORGE_API}/mods/search`, {
-    headers: { "x-api-key": CF_KEY },
-    params: {
-      gameId: 432,
-      searchFilter: query,
-      gameVersion: mcVersion || void 0,
-      classId: 6,
-      // Mods
-      sortField: 2,
-      // Downloads
-      pageSize: 20
-    }
-  });
-  return res.data.data.map((mod) => ({
-    id: String(mod.id),
-    name: mod.name,
-    description: mod.summary,
-    author: mod.authors[0]?.name || "Unknown",
-    downloads: mod.downloadCount,
-    iconUrl: mod.logo?.url,
-    versions: [],
-    source: "curseforge",
-    projectId: String(mod.id)
-  }));
-}
-async function installModrinth(mod, instanceId) {
-  const versionsRes = await axios.get(`${MODRINTH_API}/project/${mod.projectId}/version`, {
-    params: { loaders: '["fabric","forge"]' }
-  });
-  if (!versionsRes.data.length) throw new Error("No compatible versions found");
-  const latestVersion = versionsRes.data[0];
-  const file = latestVersion.files.find((f) => f.primary) || latestVersion.files[0];
-  if (!file) throw new Error("No file found for this mod");
-  const modsDir = path__namespace.join(getGameDir(), "instances", instanceId, "mods");
-  await fs__namespace.ensureDir(modsDir);
-  const dest = path__namespace.join(modsDir, file.filename);
-  const response = await axios({
-    method: "GET",
-    url: file.url,
-    responseType: "arraybuffer"
-  });
-  await fs__namespace.writeFile(dest, response.data);
-}
 function setupModHandlers(ipcMain, store2) {
-  ipcMain.handle("mods:search", async (_, { query, source, mcVersion }) => {
+  ipcMain.handle("mods:search", async (_, { query, source, mcVersion, projectType, category }) => {
     try {
-      let results = [];
-      if (source === "modrinth") {
-        results = await searchModrinth(query, mcVersion);
-      } else {
-        results = await searchCurseForge(query, mcVersion);
+      const loader = source.toLowerCase();
+      const facets = [
+        [`versions:${mcVersion}`],
+        [`project_type:${projectType}`]
+        // mod, resourcepack, shader
+      ];
+      if (projectType === "mod") {
+        facets.push([`categories:${loader}`]);
       }
-      return { success: true, results };
-    } catch (err) {
-      return { success: false, error: err.message, results: [] };
+      if (category && category !== "all") {
+        facets.push([`categories:${category}`]);
+      }
+      const res = await axios.get(`${API_BASE}/search`, {
+        params: {
+          query: query || "",
+          // Empty query allows fetching popular content
+          facets: JSON.stringify(facets),
+          index: "downloads",
+          // Sort by popularity by default
+          limit: 30
+        },
+        timeout: 1e4
+      });
+      return { success: true, results: res.data.hits };
+    } catch (error) {
+      console.error("Mod search error:", error.message);
+      return { success: false, error: "Failed to search Modrinth. Check network." };
     }
   });
   ipcMain.handle("mods:install", async (_, { mod, instanceId }) => {
     try {
-      if (mod.source === "modrinth") {
-        await installModrinth(mod, instanceId);
-      } else {
-        throw new Error("CurseForge install requires API key - see README");
-      }
-      const installed = store2.get(`mods.${instanceId}`, []);
-      installed.push({
-        id: mod.id,
-        name: mod.name,
-        filename: mod.name,
-        instanceId,
-        source: mod.source,
-        version: "latest"
+      const all = store2.get("instances", []);
+      const inst = all.find((i) => i.id === instanceId);
+      if (!inst) throw new Error("Instance not found");
+      const loaders = mod.project_type === "mod" ? JSON.stringify([inst.loader]) : void 0;
+      const verRes = await axios.get(`${API_BASE}/project/${mod.project_id}/version`, {
+        params: {
+          loaders,
+          game_versions: JSON.stringify([inst.mcVersion])
+        },
+        timeout: 1e4
       });
-      store2.set(`mods.${instanceId}`, installed);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err.message };
+      if (verRes.data.length === 0) throw new Error(`No compatible version found for ${inst.mcVersion}.`);
+      const file = verRes.data[0].files.find((f) => f.primary) || verRes.data[0].files[0];
+      let folderName = "mods";
+      if (mod.project_type === "resourcepack") folderName = "resourcepacks";
+      if (mod.project_type === "shader") folderName = "shaderpacks";
+      const targetDir = path__namespace.join(getGameDir(), "instances", instanceId, folderName);
+      await fs__namespace.ensureDir(targetDir);
+      const dest = path__namespace.join(targetDir, file.filename);
+      const response = await axios({ method: "GET", url: file.url, responseType: "stream" });
+      const writer = fs__namespace.createWriteStream(dest);
+      response.data.pipe(writer);
+      await new Promise((resolve, reject) => {
+        writer.on("finish", resolve);
+        writer.on("error", reject);
+      });
+      return { success: true, file: file.filename, folder: folderName };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   });
   ipcMain.handle("mods:get-installed", async (_, instanceId) => {
-    const installed = store2.get(`mods.${instanceId}`, []);
-    return { success: true, mods: installed };
-  });
-  ipcMain.handle("mods:remove", async (_, { modId, instanceId }) => {
     try {
-      const installed = store2.get(`mods.${instanceId}`, []);
-      const mod = installed.find((m) => m.id === modId);
-      if (mod) {
-        const modPath = path__namespace.join(getGameDir(), "instances", instanceId, "mods", mod.filename);
-        await fs__namespace.remove(modPath);
+      const instDir = path__namespace.join(getGameDir(), "instances", instanceId);
+      const folders = ["mods", "resourcepacks", "shaderpacks"];
+      let items = [];
+      for (const folder of folders) {
+        const p = path__namespace.join(instDir, folder);
+        if (await fs__namespace.pathExists(p)) {
+          const files = await fs__namespace.readdir(p);
+          const valid = files.filter((f) => f.endsWith(".jar") || f.endsWith(".zip"));
+          items.push(...valid.map((f) => ({ id: f, filename: f, name: f.split(".")[0], folder })));
+        }
       }
-      store2.set(`mods.${instanceId}`, installed.filter((m) => m.id !== modId));
+      return { success: true, mods: items };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+  ipcMain.handle("mods:remove", async (_, { modId, instanceId, folder }) => {
+    try {
+      const targetFolder = folder || "mods";
+      const file = path__namespace.join(getGameDir(), "instances", instanceId, targetFolder, modId);
+      await fs__namespace.remove(file);
       return { success: true };
-    } catch (err) {
-      return { success: false, error: err.message };
+    } catch (error) {
+      return { success: false, error: error.message };
     }
   });
 }
@@ -781,7 +614,7 @@ class KazukiRPCManager {
       instance: false,
       buttons: [
         { label: "Get Kazuki Client", url: "https://github.com/kazuki-client" },
-        { label: "Discord Server", url: "https://discord.gg/kazuki" }
+        { label: "Discord Server", url: "https://discord.gg/T3AEpEjA9m" }
       ]
     }).catch(() => {
     });

@@ -25,10 +25,10 @@ contextBridge.exposeInMainWorld('kazuki', {
     launch:  (id:string)              => ipcRenderer.invoke('instance:launch', id),
   },
   mods: {
-    search:       (q:string, src:string, ver:string) => ipcRenderer.invoke('mods:search',{query:q,source:src,mcVersion:ver}),
-    install:      (mod:any, instId:string)           => ipcRenderer.invoke('mods:install',{mod,instanceId:instId}),
-    getInstalled: (instId:string)                    => ipcRenderer.invoke('mods:get-installed',instId),
-    remove:       (modId:string, instId:string)      => ipcRenderer.invoke('mods:remove',{modId,instanceId:instId}),
+    search:       (data:any) => ipcRenderer.invoke('mods:search', data),
+    install:      (data:any) => ipcRenderer.invoke('mods:install', data),
+    getInstalled: (instId:string) => ipcRenderer.invoke('mods:get-installed', instId),
+    remove:       (data:any) => ipcRenderer.invoke('mods:remove', data),
   },
   settings: {
     get:        ()                    => ipcRenderer.invoke('settings:get'),
