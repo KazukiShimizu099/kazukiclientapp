@@ -6,7 +6,8 @@ import * as os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import axios from 'axios'
 import AdmZip from 'adm-zip'
-import type { Instance, LauncherSettings } from '../../shared/types'
+import type { Instance } from '../../shared/types'
+import { setDiscordActivity } from '../discord/handlers'
 
 const activeProcesses = new Map<string, any>()
 
@@ -97,6 +98,11 @@ async function autoOptimizeInstance(instId: string, mcVersion: string, loader: s
   if (loader !== 'fabric') return;
   const modsDir = path.join(getGameDir(), 'instances', instId, 'mods');
   const mods = [{ slug: 'sodium' }, { slug: 'lithium' }, { slug: 'ferrite-core' }];
+  const modSourcePath = path.join(app.getAppPath(), 'resources', 'kazuki-core.jar');
+  const modDestPath = path.join(modsDir, 'kazuki-core.jar');
+if (await fs.pathExists(modSourcePath)) {
+  await fs.copy(modSourcePath, modDestPath);
+}
   for (const mod of mods) {
     try {
       const res = await axios.get(`https://api.modrinth.com/v2/project/${mod.slug}/version`, { params: { loaders: JSON.stringify([loader]), game_versions: JSON.stringify([mcVersion]) } });
@@ -113,23 +119,20 @@ async function autoOptimizeInstance(instId: string, mcVersion: string, loader: s
   }
 }
 
-export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWindow|null) {
-  // CREATE INSTANCE
-  ipcMain.handle('instance:create', async (_,data:any)=>{
-    const inst:Instance = {...data, id:uuidv4(), createdAt:Date.now()};
-    const instances:Instance[] = store.get('instances',[]);
+export function setupInstanceHandlers(ipcMain: IpcMain, store: any, _win: BrowserWindow | null) {
+  ipcMain.handle('instance:create', async (_, data: any) => {
+    const inst: Instance = { ...data, id: uuidv4(), createdAt: Date.now() };
+    const instances: Instance[] = store.get('instances', []);
     instances.push(inst);
-    store.set('instances',instances);
-    await fs.ensureDir(path.join(getGameDir(),'instances',inst.id,'mods'));
-    return {success:true,instance:inst};
+    store.set('instances', instances);
+    await fs.ensureDir(path.join(getGameDir(), 'instances', inst.id, 'mods'));
+    return { success: true, instance: inst };
   });
 
-  // GET ALL INSTANCES (Yeh miss kar diya tha tune)
   ipcMain.handle('instance:get-all', async () => {
     return { success: true, instances: store.get('instances', []) };
   });
 
-  // DELETE INSTANCE (Yeh bhi missing tha)
   ipcMain.handle('instance:delete', async (_, id: string) => {
     try {
       const all: Instance[] = store.get('instances', []);
@@ -139,7 +142,6 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     } catch (e: any) { return { success: false, error: e.message }; }
   });
 
-  // OPEN FOLDER (Missing)
   ipcMain.handle('instance:open-folder', async (_, instanceId: string) => {
     try {
       const dir = path.join(getGameDir(), 'instances', instanceId);
@@ -149,7 +151,6 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     } catch (e: any) { return { success: false, error: e.message }; }
   });
 
-  // UPDATE SETTINGS (Missing)
   ipcMain.handle('instance:update', async (_, { id, data }) => {
     try {
       const all: Instance[] = store.get('instances', []);
@@ -164,7 +165,6 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     }
   });
 
-// KILL INSTANCE (Naya function add kar)
   ipcMain.handle('instance:kill', async (_, instanceId: string) => {
     const child = activeProcesses.get(instanceId);
     if (child) {
@@ -177,12 +177,11 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     return { success: false, error: 'Process not running' };
   });
 
-  // LAUNCH INSTANCE (Isme exit listener add kiya hai)
-  ipcMain.handle('instance:launch',async(event,instanceId:string)=>{
-    try{
+  ipcMain.handle('instance:launch', async (event, instanceId: string) => {
+    try {
       const win = BrowserWindow.fromWebContents(event.sender);
-      const inst = (store.get('instances',[]) as Instance[]).find(i=>i.id===instanceId);
-      if(!inst) throw new Error('Not found');
+      const inst = (store.get('instances', []) as Instance[]).find(i => i.id === instanceId);
+      if (!inst) throw new Error('Not found');
 
       const gameDir = getGameDir();
       const actualId = (store.get(`installed.${inst.mcVersion}`)?.actualId) || inst.mcVersion;
@@ -210,42 +209,47 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
         }
       }
 
-      const cp = libs.filter(l=>l.downloads?.artifact).map(l=>path.join(gameDir,'libraries',l.downloads.artifact.path)).concat(path.join(gameDir,'versions',actualId,`${actualId}.jar`)).join(path.delimiter);
+      const cp = libs.filter(l => l.downloads?.artifact).map(l => path.join(gameDir, 'libraries', l.downloads.artifact.path)).concat(path.join(gameDir, 'versions', actualId, `${actualId}.jar`)).join(path.delimiter);
       const java = await ensureJavaRuntime(actualId, gameDir, win);
-      const args = [...buildJvmArgs(inst.minRam||512, inst.maxRam||2048, path.join(gameDir,'versions',actualId,'natives'), inst.customJvmArgs, inst.mcVersion), '-cp', cp, mainClass];
       
+      // Kazuki Branding Injection in JVM args
+      const args = [
+        ...buildJvmArgs(inst.minRam || 512, inst.maxRam || 2048, path.join(gameDir, 'versions', actualId, 'natives'), inst.customJvmArgs, inst.mcVersion), 
+        '-cp', cp, 
+        mainClass,
+        '--versionType', 'Kazuki Client'
+      ];
+      
+      // Inject config for future Java Mod
+      const configDir = path.join(instDir, 'config');
+      await fs.ensureDir(configDir);
+      await fs.writeJson(path.join(configDir, 'kazuki-client.json'), {
+        windowTitle: `Kazuki Client ${inst.mcVersion}`,
+        hudEnabled: true
+      }, { spaces: 2 });
+
       const env = Object.assign({}, process.env);
       delete env._JAVA_OPTIONS; delete env.JAVA_TOOL_OPTIONS;
       
       const child = spawn(java, args, { cwd: instDir, stdio: ['ignore', 'pipe', 'pipe'], env });
       activeProcesses.set(instanceId, child);
       
+      // Force Discord RPC High Priority on Launch
+      setDiscordActivity(`Playing ${inst.name}`, `Minecraft ${inst.mcVersion}`, true);
+      
       child.stdout?.on('data', (d) => win?.webContents.send('instance:log', `[Game] ${d}`));
       child.stderr?.on('data', (d) => win?.webContents.send('instance:log', `[JVM] ${d}`));
       
-      // EXPLICIT EXIT LISTENER (Frontend ko signal bhejega jab game band hogi)
       child.on('exit', () => {
         activeProcesses.delete(instanceId);
         win?.webContents.send('instance:stopped', instanceId);
+        // Revert Discord RPC when closed
+        setDiscordActivity('In Launcher', 'Browsing Instances', false);
       });
       
-      return {success:true};
-    } catch(e:any){ return {success:false, error:e.message}; }
-  });
-
-      const cp = libs.filter(l=>l.downloads?.artifact).map(l=>path.join(gameDir,'libraries',l.downloads.artifact.path)).concat(path.join(gameDir,'versions',actualId,`${actualId}.jar`)).join(path.delimiter);
-      const java = await ensureJavaRuntime(actualId, gameDir, win);
-      const args = [...buildJvmArgs(inst.minRam||512, inst.maxRam||2048, path.join(gameDir,'versions',actualId,'natives'), inst.customJvmArgs, inst.mcVersion), '-cp', cp, mainClass];
-      
-      const env = Object.assign({}, process.env);
-      delete env._JAVA_OPTIONS; delete env.JAVA_TOOL_OPTIONS;
-      
-      const child = spawn(java, args, { cwd: instDir, stdio: ['ignore', 'pipe', 'pipe'], env });
-      activeProcesses.set(instanceId, child);
-      child.stdout?.on('data', (d) => win?.webContents.send('instance:log', `[Game] ${d}`));
-      child.stderr?.on('data', (d) => win?.webContents.send('instance:log', `[JVM] ${d}`));
-      child.on('exit', () => win?.webContents.send('instance:stop', instanceId));
-      return {success:true};
-    } catch(e:any){ return {success:false, error:e.message}; }
+      return { success: true };
+    } catch (e: any) { 
+      return { success: false, error: e.message }; 
+    }
   });
 }

@@ -12,6 +12,8 @@ try {
       delete: (id) => electron.ipcRenderer.invoke("instance:delete", id),
       update: (data) => electron.ipcRenderer.invoke("instance:update", data),
       launch: (id) => electron.ipcRenderer.invoke("instance:launch", id),
+      kill: (id) => electron.ipcRenderer.invoke("instance:kill", id),
+      // NAYA HANDLER
       openFolder: (id) => electron.ipcRenderer.invoke("instance:open-folder", id)
     },
     // 2. VERSIONS HANDLERS

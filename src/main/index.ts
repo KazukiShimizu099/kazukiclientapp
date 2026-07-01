@@ -40,23 +40,36 @@ function createWindow() {
     shell.openExternal(url)
     return { action: 'deny' }
   })
-
-  ipcMain.on('window:minimize', () => mainWindow?.minimize())
-  ipcMain.on('window:maximize', () => {
-    if (mainWindow?.isMaximized()) mainWindow.unmaximize()
-    else mainWindow?.maximize()
-  })
-  ipcMain.on('window:close', () => mainWindow?.close())
 }
 
 app.whenReady().then(() => {
   createWindow()
+  
   setupAuthHandlers(ipcMain, store)
   setupVersionHandlers(ipcMain, store)
   setupInstanceHandlers(ipcMain, store, mainWindow)
   setupModHandlers(ipcMain, store)
   setupSettingsHandlers(ipcMain, store)
   setupDiscordHandlers(ipcMain, store)
+
+  // FIX: Global Window Controllers
+  ipcMain.removeAllListeners('window:minimize')
+  ipcMain.removeAllListeners('window:maximize')
+  ipcMain.removeAllListeners('window:close')
+
+  ipcMain.on('window:minimize', () => {
+    BrowserWindow.getFocusedWindow()?.minimize()
+  })
+  
+  ipcMain.on('window:maximize', () => {
+    const win = BrowserWindow.getFocusedWindow()
+    if (win?.isMaximized()) win.unmaximize()
+    else win?.maximize()
+  })
+  
+  ipcMain.on('window:close', () => {
+    BrowserWindow.getFocusedWindow()?.close()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

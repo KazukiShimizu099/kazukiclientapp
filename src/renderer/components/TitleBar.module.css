@@ -1,29 +1,56 @@
-.bar {
-  height:40px;
-  background:rgba(3,2,10,.96);
-  border-bottom:1px solid rgba(74,222,128,.08);
-  display:flex;align-items:center;padding:0 14px;gap:10px;
-  flex-shrink:0;position:relative;z-index:300;
+.titlebar {
+  height: 32px;
+  background: var(--bg-base);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-light);
+  user-select: none;
+  -webkit-app-region: drag;
+  z-index: 9999;
 }
-.bar::after {
-  content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,rgba(74,222,128,.3),rgba(155,109,255,.2),transparent);
+
+.dragRegion {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 16px;
+  height: 100%;
 }
-.logoWrap { display:flex;align-items:center;gap:8px; }
-.leafIcon {
-  width:22px;height:22px;object-fit:contain;
-  animation:leafGlow 4s ease-in-out infinite;
+
+.title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 2px;
 }
-.name { font-family:var(--disp);font-size:16px;font-weight:700;color:var(--t1);letter-spacing:2px; }
-.sep  { font-size:12px;color:var(--t3);margin:0 4px; }
-.sub  { font-size:10px;font-weight:500;letter-spacing:5px;color:var(--t2);text-transform:uppercase; }
-.tag  { font-family:var(--mono);font-size:10px;color:var(--t3);padding:2px 7px;border:1px solid rgba(74,222,128,.1);border-radius:3px; }
-.winBtns { display:flex;gap:1px; }
-.wb {
-  width:32px;height:28px;background:transparent;border:none;
-  color:rgba(200,180,255,.3);
-  display:flex;align-items:center;justify-content:center;
-  border-radius:var(--r1);transition:background .12s,color .12s;
+
+.controls {
+  display: flex;
+  height: 100%;
+  -webkit-app-region: no-drag;
 }
-.wb:hover { background:rgba(255,255,255,.05);color:rgba(220,210,255,.8); }
-.closeBtn:hover { background:rgba(244,63,94,.15);color:var(--red); }
+
+.ctrlBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 44px;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.ctrlBtn:hover {
+  background: var(--bg-surface);
+  color: var(--text-main);
+}
+
+.closeBtn:hover {
+  background: #e81123;
+  color: #fff;
+}

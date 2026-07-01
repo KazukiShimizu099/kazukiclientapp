@@ -383,6 +383,33 @@ function setupVersionHandlers(ipcMain, store2) {
     }
   });
 }
+const clientId = "123456789012345678";
+let rpc = null;
+let isReady = false;
+function setDiscordActivity(details, state, inGame = false) {
+  if (!rpc || !isReady) return;
+  rpc.setActivity({
+    details,
+    state,
+    startTimestamp: /* @__PURE__ */ new Date(),
+    // Fresh timestamp forces priority
+    largeImageKey: "logo",
+    largeImageText: "Kazuki Client",
+    instance: inGame
+    // CRITICAL: Tells Discord this is an active game session
+  }).catch(() => {
+  });
+}
+function setupDiscordHandlers(ipcMain, store2) {
+  rpc = new discordRpc.Client({ transport: "ipc" });
+  rpc.on("ready", () => {
+    isReady = true;
+    setDiscordActivity("In Launcher", "Browsing Instances", false);
+  });
+  rpc.login({ clientId }).catch(() => {
+    console.log("Discord RPC not running or failed to connect.");
+  });
+}
 const activeProcesses = /* @__PURE__ */ new Map();
 electron.app.on("before-quit", () => {
   for (const [id, child] of activeProcesses.entries()) {
@@ -469,6 +496,11 @@ async function autoOptimizeInstance(instId, mcVersion, loader, win) {
   if (loader !== "fabric") return;
   const modsDir = path__namespace.join(getGameDir$1(), "instances", instId, "mods");
   const mods = [{ slug: "sodium" }, { slug: "lithium" }, { slug: "ferrite-core" }];
+  const modSourcePath = path__namespace.join(electron.app.getAppPath(), "resources", "kazuki-core.jar");
+  const modDestPath = path__namespace.join(modsDir, "kazuki-core.jar");
+  if (await fs__namespace.pathExists(modSourcePath)) {
+    await fs__namespace.copy(modSourcePath, modDestPath);
+  }
   for (const mod of mods) {
     try {
       const res = await axios.get(`https://api.modrinth.com/v2/project/${mod.slug}/version`, { params: { loaders: JSON.stringify([loader]), game_versions: JSON.stringify([mcVersion]) } });
@@ -529,6 +561,19 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       return { success: false, error: e.message };
     }
   });
+  ipcMain.handle("instance:kill", async (_, instanceId) => {
+    const child = activeProcesses.get(instanceId);
+    if (child) {
+      try {
+        child.kill("SIGKILL");
+        activeProcesses.delete(instanceId);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+    return { success: false, error: "Process not running" };
+  });
   ipcMain.handle("instance:launch", async (event, instanceId) => {
     try {
       const win = electron.BrowserWindow.fromWebContents(event.sender);
@@ -558,15 +603,33 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       }
       const cp = libs.filter((l) => l.downloads?.artifact).map((l) => path__namespace.join(gameDir, "libraries", l.downloads.artifact.path)).concat(path__namespace.join(gameDir, "versions", actualId, `${actualId}.jar`)).join(path__namespace.delimiter);
       const java = await ensureJavaRuntime(actualId, gameDir, win);
-      const args = [...buildJvmArgs(inst.minRam || 512, inst.maxRam || 2048, path__namespace.join(gameDir, "versions", actualId, "natives"), inst.customJvmArgs, inst.mcVersion), "-cp", cp, mainClass];
+      const args = [
+        ...buildJvmArgs(inst.minRam || 512, inst.maxRam || 2048, path__namespace.join(gameDir, "versions", actualId, "natives"), inst.customJvmArgs, inst.mcVersion),
+        "-cp",
+        cp,
+        mainClass,
+        "--versionType",
+        "Kazuki Client"
+      ];
+      const configDir = path__namespace.join(instDir, "config");
+      await fs__namespace.ensureDir(configDir);
+      await fs__namespace.writeJson(path__namespace.join(configDir, "kazuki-client.json"), {
+        windowTitle: `Kazuki Client ${inst.mcVersion}`,
+        hudEnabled: true
+      }, { spaces: 2 });
       const env = Object.assign({}, process.env);
       delete env._JAVA_OPTIONS;
       delete env.JAVA_TOOL_OPTIONS;
       const child = child_process.spawn(java, args, { cwd: instDir, stdio: ["ignore", "pipe", "pipe"], env });
       activeProcesses.set(instanceId, child);
+      setDiscordActivity(`Playing ${inst.name}`, `Minecraft ${inst.mcVersion}`, true);
       child.stdout?.on("data", (d) => win?.webContents.send("instance:log", `[Game] ${d}`));
       child.stderr?.on("data", (d) => win?.webContents.send("instance:log", `[JVM] ${d}`));
-      child.on("exit", () => win?.webContents.send("instance:stop", instanceId));
+      child.on("exit", () => {
+        activeProcesses.delete(instanceId);
+        win?.webContents.send("instance:stopped", instanceId);
+        setDiscordActivity("In Launcher", "Browsing Instances", false);
+      });
       return { success: true };
     } catch (e) {
       return { success: false, error: e.message };
@@ -707,106 +770,6 @@ function setupSettingsHandlers(ipcMain, store2) {
     return { totalRam, cpu, platform, arch, autoRam };
   });
 }
-const CLIENT_ID = "1521010841774981160";
-class KazukiRPCManager {
-  constructor() {
-    this.client = null;
-    this.isReady = false;
-    this.reconnectTimeout = null;
-    this.connect();
-  }
-  async connect() {
-    if (this.client) {
-      try {
-        await this.client.destroy();
-      } catch (e) {
-      }
-      this.client = null;
-    }
-    this.isReady = false;
-    this.client = new discordRpc.Client({ transport: "ipc" });
-    this.client.on("ready", () => {
-      this.isReady = true;
-      console.log("SUCCESS: Discord RPC connected automatically.");
-      this.updateActivity("Kazuki Client", "In Launcher");
-      if (this.reconnectTimeout) {
-        clearTimeout(this.reconnectTimeout);
-        this.reconnectTimeout = null;
-      }
-    });
-    this.client.on("error", (err) => {
-      console.error("RPC Error:", err.message);
-      this.scheduleReconnect();
-    });
-    try {
-      await this.client.login({ clientId: CLIENT_ID });
-    } catch (err) {
-      this.scheduleReconnect();
-    }
-  }
-  scheduleReconnect() {
-    if (this.reconnectTimeout) return;
-    this.isReady = false;
-    console.log("Auto-reconnecting to Discord in 15s...");
-    this.reconnectTimeout = setTimeout(() => {
-      this.reconnectTimeout = null;
-      this.connect();
-    }, 15e3);
-  }
-  updateActivity(details, state) {
-    if (!this.isReady || !this.client) return;
-    this.client.setActivity({
-      details,
-      state,
-      startTimestamp: Date.now(),
-      largeImageKey: "kazuki_logo",
-      largeImageText: "Kazuki Client",
-      smallImageKey: "minecraft",
-      smallImageText: "Minecraft",
-      instance: false,
-      buttons: [
-        { label: "Get Kazuki Client", url: "https://github.com/" },
-        { label: "Discord Server", url: "https://discord.gg/T3AEpEjA9m" }
-      ]
-    }).catch(() => {
-    });
-  }
-  destroy() {
-    if (this.reconnectTimeout) {
-      clearTimeout(this.reconnectTimeout);
-      this.reconnectTimeout = null;
-    }
-    if (this.client) {
-      this.client.destroy().catch(() => {
-      });
-      this.client = null;
-    }
-    this.isReady = false;
-  }
-}
-const rpcManager = new KazukiRPCManager();
-function setupDiscordHandlers(ipcMain) {
-  ipcMain.handle("discord:get-config", () => ({
-    success: true,
-    config: { enabled: true, details: "Kazuki Client", state: "Launcher" }
-  }));
-  ipcMain.handle("discord:set-config", (_, cfg) => {
-    rpcManager.updateActivity(cfg.details || "Kazuki Client", cfg.state);
-    return { success: true };
-  });
-  ipcMain.handle("discord:set-state", (_, { state, details }) => {
-    rpcManager.updateActivity(details, state);
-    return { success: true };
-  });
-  ipcMain.handle("discord:reconnect", async () => {
-    if (!rpcManager.isReady) await rpcManager.connect();
-    return { success: rpcManager.isReady };
-  });
-  ipcMain.handle("discord:get-status", () => ({
-    connected: rpcManager.isReady,
-    clientId: CLIENT_ID
-  }));
-}
 const store = new Store();
 let mainWindow = null;
 const isDev = !electron.app.isPackaged;
@@ -838,12 +801,6 @@ function createWindow() {
     electron.shell.openExternal(url);
     return { action: "deny" };
   });
-  electron.ipcMain.on("window:minimize", () => mainWindow?.minimize());
-  electron.ipcMain.on("window:maximize", () => {
-    if (mainWindow?.isMaximized()) mainWindow.unmaximize();
-    else mainWindow?.maximize();
-  });
-  electron.ipcMain.on("window:close", () => mainWindow?.close());
 }
 electron.app.whenReady().then(() => {
   createWindow();
@@ -852,7 +809,21 @@ electron.app.whenReady().then(() => {
   setupInstanceHandlers(electron.ipcMain, store);
   setupModHandlers(electron.ipcMain, store);
   setupSettingsHandlers(electron.ipcMain, store);
-  setupDiscordHandlers(electron.ipcMain);
+  setupDiscordHandlers();
+  electron.ipcMain.removeAllListeners("window:minimize");
+  electron.ipcMain.removeAllListeners("window:maximize");
+  electron.ipcMain.removeAllListeners("window:close");
+  electron.ipcMain.on("window:minimize", () => {
+    electron.BrowserWindow.getFocusedWindow()?.minimize();
+  });
+  electron.ipcMain.on("window:maximize", () => {
+    const win = electron.BrowserWindow.getFocusedWindow();
+    if (win?.isMaximized()) win.unmaximize();
+    else win?.maximize();
+  });
+  electron.ipcMain.on("window:close", () => {
+    electron.BrowserWindow.getFocusedWindow()?.close();
+  });
   electron.app.on("activate", () => {
     if (electron.BrowserWindow.getAllWindows().length === 0) createWindow();
   });
