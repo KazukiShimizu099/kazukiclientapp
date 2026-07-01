@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import s from './HomePage.module.css'
 import CreateInstanceModal from '../components/CreateInstanceModal'
 import InstanceSettingsModal from '../components/InstanceSettingsModal'
@@ -10,6 +10,11 @@ export default function HomePage() {
   const [editingInst, setEditingInst] = useState<Instance | null>(null)
   const [consoleLogs, setConsoleLogs] = useState<string[]>([])
 
+  // Timer State
+  const [playingId, setPlayingId] = useState<string | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  const timerRef = useRef<any>(null)
+
   async function loadInstances() {
     const r = await window.kazuki?.instance.getAll()
     if (r?.success) setInstances(r.instances)
@@ -20,12 +25,54 @@ export default function HomePage() {
     window.kazuki?.on('instance:log', (msg: string) => {
       setConsoleLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString()}] ${msg}`])
     })
-    return () => { window.kazuki?.off('instance:log') }
+    
+    // Auto-stop timer when game closes
+    window.kazuki?.on('instance:stop', (id: string) => {
+      setPlayingId(prev => {
+        if (prev === id) {
+          if (timerRef.current) clearInterval(timerRef.current)
+          return null
+        }
+        return prev
+      })
+    })
+
+    return () => { 
+      window.kazuki?.off('instance:log')
+      window.kazuki?.off('instance:stop')
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
   }, [])
 
+  function startTimer(id: string) {
+    setPlayingId(id)
+    setElapsed(0)
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerRef.current = setInterval(() => {
+      setElapsed(prev => prev + 1)
+    }, 1000)
+  }
+
+  function stopTimer() {
+    setPlayingId(null)
+    if (timerRef.current) clearInterval(timerRef.current)
+  }
+
   async function launch(id: string) {
+    if (playingId === id) return; // Prevent spam clicking
+    startTimer(id)
     const r = await window.kazuki?.instance.launch(id)
-    if (!r?.success) alert(r?.error)
+    if (!r?.success) {
+      alert(r?.error)
+      stopTimer()
+    }
+  }
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    const h = Math.floor(secs / 3600)
+    return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`
   }
 
   return (
@@ -37,17 +84,22 @@ export default function HomePage() {
 
       <div className={s.grid}>
         {instances.map(inst => (
-          <div key={inst.id} className={s.card} onClick={() => launch(inst.id)}>
+          <div key={inst.id} className={s.card}>
             <div className={s.cardContent}>
               <div className={s.cardName}>{inst.name}</div>
               <div className={s.cardDetails}>{inst.mcVersion} • {inst.loader}</div>
             </div>
-            <button 
-              className={s.editBtn} 
-              onClick={(e) => { e.stopPropagation(); setEditingInst(inst) }}
-            >
-              ⚙️
-            </button>
+            
+            <div className={s.cardActions}>
+              <button 
+                className={playingId === inst.id ? s.playingBtn : s.launchBtn} 
+                onClick={() => launch(inst.id)}
+                disabled={playingId === inst.id}
+              >
+                {playingId === inst.id ? `▶ ${formatTime(elapsed)}` : 'Launch'}
+              </button>
+              <button className={s.editBtn} onClick={() => setEditingInst(inst)}>⚙️</button>
+            </div>
           </div>
         ))}
       </div>

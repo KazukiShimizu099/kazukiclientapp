@@ -69,7 +69,7 @@ export default function ModsPage() {
     if (r?.success) {
       if (currentOffset === 0) setResults(r.results)
       else setResults(prev => [...prev, ...r.results])
-      setHasMore(r.results.length === 30) // If it returned 30, there's probably more
+      setHasMore(r.results.length === 30)
     } else {
       if (currentOffset === 0) setResults([])
     }
@@ -102,8 +102,6 @@ export default function ModsPage() {
     setActionLoading(null)
   }
 
-  const inst = instances.find(i => i.id === selectedInstId)
-
   if (instances.length === 0) {
     return (
       <div className={s.page}>
@@ -116,19 +114,17 @@ export default function ModsPage() {
     <div className={s.page}>
       <div className={s.header}>
         <div className={s.headerTitle}>Content Manager</div>
-        <div style={{display:'flex', gap: '10px'}}>
-          <button onClick={handleOpenFolder} style={{
-            padding: '8px 16px', background: 'rgba(255,255,255,0.05)', 
-            border: '1px solid rgba(255,255,255,0.1)', color: '#fff', 
-            borderRadius: '6px', fontSize: '13px', cursor: 'pointer'
-          }}>
-            📁 Open Folder
+        <div className={s.headerActions}>
+          <button className={s.actionBtn} onClick={handleOpenFolder}>
+            📂 Open Folder
           </button>
-          <select className={s.instSelect} value={selectedInstId} onChange={e => setSelectedInstId(e.target.value)}>
-            {instances.map(i => (
-              <option key={i.id} value={i.id}>{i.name} ({i.mcVersion} - {i.loader})</option>
-            ))}
-          </select>
+          <div className={s.selectWrapper}>
+            <select className={s.instSelect} value={selectedInstId} onChange={e => setSelectedInstId(e.target.value)}>
+              {instances.map(i => (
+                <option key={i.id} value={i.id}>{i.name} ({i.mcVersion} - {i.loader})</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -187,17 +183,11 @@ export default function ModsPage() {
                 )
               })}
               
-              {loading && <div className={s.noRes}>Loading data from Modrinth...</div>}
+              {loading && <div className={s.noRes}>Searching Modrinth...</div>}
               {!loading && results.length === 0 && <div className={s.noRes}>No results found</div>}
               
               {!loading && results.length > 0 && hasMore && (
-                <button 
-                  onClick={handleLoadMore} 
-                  style={{
-                    padding: '12px', background: 'rgba(255,255,255,0.05)', 
-                    border: '1px solid rgba(255,255,255,0.1)', color: '#fff', 
-                    borderRadius: '8px', cursor: 'pointer', marginTop: '10px'
-                  }}>
+                <button className={s.loadMoreBtn} onClick={handleLoadMore}>
                   Load More Content
                 </button>
               )}
@@ -223,7 +213,7 @@ export default function ModsPage() {
                   onClick={() => handleRemove(mod.id, mod.folder)}
                   disabled={actionLoading === mod.id}
                 >
-                  {actionLoading === mod.id ? '...' : 'Delete'}
+                  {actionLoading === mod.id ? 'Wait...' : 'Delete'}
                 </button>
               </div>
             ))}

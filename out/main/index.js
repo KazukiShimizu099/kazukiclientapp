@@ -566,6 +566,7 @@ function setupInstanceHandlers(ipcMain, store2, _win) {
       activeProcesses.set(instanceId, child);
       child.stdout?.on("data", (d) => win?.webContents.send("instance:log", `[Game] ${d}`));
       child.stderr?.on("data", (d) => win?.webContents.send("instance:log", `[JVM] ${d}`));
+      child.on("exit", () => win?.webContents.send("instance:stop", instanceId));
       return { success: true };
     } catch (e) {
       return { success: false, error: e.message };
