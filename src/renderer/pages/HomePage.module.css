@@ -27,11 +27,12 @@
 }
 .launchBtn:hover { opacity: 0.9; transform: scale(1.03); }
 
-.playingBtn { 
-  background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.2); 
-  color: #4ade80; padding: 8px 16px; border-radius: 6px; font-size: 13px; 
-  font-weight: 600; font-family: var(--font-mono); cursor: default; 
+.stopBtn { 
+  background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); 
+  color: #ef4444; padding: 8px 16px; border-radius: 6px; font-size: 13px; 
+  font-weight: 600; font-family: var(--font-mono); cursor: pointer; transition: 0.2s;
 }
+.stopBtn:hover { background: rgba(239, 68, 68, 0.2); color: #fff; }
 
 .editBtn { background: transparent; border: 1px solid transparent; padding: 8px; border-radius: 6px; cursor: pointer; color: var(--text-muted); transition: 0.2s; }
 .editBtn:hover { background: var(--bg-surface); border-color: var(--border-light); color: var(--text-main); }

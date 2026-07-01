@@ -164,7 +164,20 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
     }
   });
 
-  // LAUNCH INSTANCE
+// KILL INSTANCE (Naya function add kar)
+  ipcMain.handle('instance:kill', async (_, instanceId: string) => {
+    const child = activeProcesses.get(instanceId);
+    if (child) {
+      try {
+        child.kill('SIGKILL');
+        activeProcesses.delete(instanceId);
+        return { success: true };
+      } catch (e: any) { return { success: false, error: e.message }; }
+    }
+    return { success: false, error: 'Process not running' };
+  });
+
+  // LAUNCH INSTANCE (Isme exit listener add kiya hai)
   ipcMain.handle('instance:launch',async(event,instanceId:string)=>{
     try{
       const win = BrowserWindow.fromWebContents(event.sender);
@@ -196,6 +209,29 @@ export function setupInstanceHandlers(ipcMain:IpcMain, store:any, _win:BrowserWi
           }
         }
       }
+
+      const cp = libs.filter(l=>l.downloads?.artifact).map(l=>path.join(gameDir,'libraries',l.downloads.artifact.path)).concat(path.join(gameDir,'versions',actualId,`${actualId}.jar`)).join(path.delimiter);
+      const java = await ensureJavaRuntime(actualId, gameDir, win);
+      const args = [...buildJvmArgs(inst.minRam||512, inst.maxRam||2048, path.join(gameDir,'versions',actualId,'natives'), inst.customJvmArgs, inst.mcVersion), '-cp', cp, mainClass];
+      
+      const env = Object.assign({}, process.env);
+      delete env._JAVA_OPTIONS; delete env.JAVA_TOOL_OPTIONS;
+      
+      const child = spawn(java, args, { cwd: instDir, stdio: ['ignore', 'pipe', 'pipe'], env });
+      activeProcesses.set(instanceId, child);
+      
+      child.stdout?.on('data', (d) => win?.webContents.send('instance:log', `[Game] ${d}`));
+      child.stderr?.on('data', (d) => win?.webContents.send('instance:log', `[JVM] ${d}`));
+      
+      // EXPLICIT EXIT LISTENER (Frontend ko signal bhejega jab game band hogi)
+      child.on('exit', () => {
+        activeProcesses.delete(instanceId);
+        win?.webContents.send('instance:stopped', instanceId);
+      });
+      
+      return {success:true};
+    } catch(e:any){ return {success:false, error:e.message}; }
+  });
 
       const cp = libs.filter(l=>l.downloads?.artifact).map(l=>path.join(gameDir,'libraries',l.downloads.artifact.path)).concat(path.join(gameDir,'versions',actualId,`${actualId}.jar`)).join(path.delimiter);
       const java = await ensureJavaRuntime(actualId, gameDir, win);

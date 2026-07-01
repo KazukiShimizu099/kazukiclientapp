@@ -10,7 +10,6 @@ export default function HomePage() {
   const [editingInst, setEditingInst] = useState<Instance | null>(null)
   const [consoleLogs, setConsoleLogs] = useState<string[]>([])
 
-  // Timer State
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [elapsed, setElapsed] = useState(0)
   const timerRef = useRef<any>(null)
@@ -26,8 +25,8 @@ export default function HomePage() {
       setConsoleLogs(prev => [...prev.slice(-49), `[${new Date().toLocaleTimeString()}] ${msg}`])
     })
     
-    // Auto-stop timer when game closes
-    window.kazuki?.on('instance:stop', (id: string) => {
+    // Auto-stop UI when backend process exits (Manual close by user)
+    window.kazuki?.on('instance:stopped', (id: string) => {
       setPlayingId(prev => {
         if (prev === id) {
           if (timerRef.current) clearInterval(timerRef.current)
@@ -39,7 +38,7 @@ export default function HomePage() {
 
     return () => { 
       window.kazuki?.off('instance:log')
-      window.kazuki?.off('instance:stop')
+      window.kazuki?.off('instance:stopped')
       if (timerRef.current) clearInterval(timerRef.current)
     }
   }, [])
@@ -58,8 +57,15 @@ export default function HomePage() {
     if (timerRef.current) clearInterval(timerRef.current)
   }
 
-  async function launch(id: string) {
-    if (playingId === id) return; // Prevent spam clicking
+  async function toggleLaunch(id: string) {
+    if (playingId === id) {
+      // If currently playing, STOP it.
+      await window.kazuki?.instance.kill(id)
+      stopTimer()
+      return
+    }
+
+    // Otherwise, LAUNCH it.
     startTimer(id)
     const r = await window.kazuki?.instance.launch(id)
     if (!r?.success) {
@@ -92,11 +98,10 @@ export default function HomePage() {
             
             <div className={s.cardActions}>
               <button 
-                className={playingId === inst.id ? s.playingBtn : s.launchBtn} 
-                onClick={() => launch(inst.id)}
-                disabled={playingId === inst.id}
+                className={playingId === inst.id ? s.stopBtn : s.launchBtn} 
+                onClick={() => toggleLaunch(inst.id)}
               >
-                {playingId === inst.id ? `▶ ${formatTime(elapsed)}` : 'Launch'}
+                {playingId === inst.id ? `Stop [${formatTime(elapsed)}]` : 'Launch'}
               </button>
               <button className={s.editBtn} onClick={() => setEditingInst(inst)}>⚙️</button>
             </div>

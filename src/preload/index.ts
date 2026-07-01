@@ -7,12 +7,13 @@ if (!process.contextIsolated) {
 try {
   contextBridge.exposeInMainWorld('kazuki', {
     // 1. INSTANCE HANDLERS
-    instance: {
+instance: {
       create: (data: any) => ipcRenderer.invoke('instance:create', data),
       getAll: () => ipcRenderer.invoke('instance:get-all'),
       delete: (id: string) => ipcRenderer.invoke('instance:delete', id),
       update: (data: {id: string, data: any}) => ipcRenderer.invoke('instance:update', data),
       launch: (id: string) => ipcRenderer.invoke('instance:launch', id),
+      kill: (id: string) => ipcRenderer.invoke('instance:kill', id), // NAYA HANDLER
       openFolder: (id: string) => ipcRenderer.invoke('instance:open-folder', id)
     },
     
